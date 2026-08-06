@@ -15,6 +15,7 @@ TAG = 0x7373
 SIMPLE_TAG = 0x67C8
 TAG_NAME = 0x45A3
 TAG_STRING = 0x4487
+TAG_BINARY = 0x4485
 
 
 def _read_vint(data: bytes, pos: int, keep_marker: bool) -> tuple[int, int]:
@@ -82,18 +83,28 @@ def _segment_bounds(data: bytes) -> tuple[int, int, int]:
     raise ValueError("no Matroska Segment found")
 
 
-def build_tags(name: str, text: str) -> bytes:
-    simple = _element(TAG_NAME, name.encode()) + _element(TAG_STRING, text.encode())
-    return _element(TAGS, _element(TAG, _element(SIMPLE_TAG, simple)))
+def build_tags(tags: dict[str, str | bytes]) -> bytes:
+    """One Tags element holding one SimpleTag per entry.
+
+    str payloads become TagString (UTF-8); bytes payloads become TagBinary.
+    """
+    body = b""
+    for name, payload in tags.items():
+        if isinstance(payload, str):
+            value = _element(TAG_STRING, payload.encode())
+        else:
+            value = _element(TAG_BINARY, bytes(payload))
+        body += _element(TAG, _element(SIMPLE_TAG, _element(TAG_NAME, name.encode()) + value))
+    return _element(TAGS, body)
 
 
-def append_tag(webm: bytes, name: str, text: str) -> bytes:
-    """Return new WebM bytes with a Tags/SimpleTag appended to the Segment."""
+def append_tags(webm: bytes, tags: dict[str, str | bytes]) -> bytes:
+    """Return new WebM bytes with a Tags element appended to the Segment."""
     seg_start, payload_start, payload_end = _segment_bounds(webm)
     head = webm[:seg_start]
     payload = webm[payload_start:payload_end]
     trailer = webm[payload_end:]
-    new_payload = payload + build_tags(name, text)
+    new_payload = payload + build_tags(tags)
     # Fixed 8-byte size vint keeps room for any file size.
     return (
         head
@@ -104,10 +115,15 @@ def append_tag(webm: bytes, name: str, text: str) -> bytes:
     )
 
 
-def read_tag(webm: bytes, name: str) -> str | None:
-    """Return the TagString of the SimpleTag with TagName == name, or None."""
+def append_tag(webm: bytes, name: str, text: str) -> bytes:
+    """Back-compat convenience for a single string tag."""
+    return append_tags(webm, {name: text})
+
+
+def read_all_tags(webm: bytes) -> dict[str, str | bytes]:
+    """All SimpleTags in the file: TagString entries as str, TagBinary as bytes."""
     _, payload_start, payload_end = _segment_bounds(webm)
-    wanted = name.encode()
+    out: dict[str, str | bytes] = {}
     for eid, start, end in iter_children(webm, payload_start, payload_end):
         if eid != TAGS:
             continue
@@ -117,12 +133,20 @@ def read_tag(webm: bytes, name: str) -> str | None:
             for sid, sstart, send in iter_children(webm, tstart, tend):
                 if sid != SIMPLE_TAG:
                     continue
-                tag_name, tag_string = None, None
+                tag_name, value = None, None
                 for fid, fstart, fend in iter_children(webm, sstart, send):
                     if fid == TAG_NAME:
-                        tag_name = webm[fstart:fend]
+                        tag_name = webm[fstart:fend].decode()
                     elif fid == TAG_STRING:
-                        tag_string = webm[fstart:fend]
-                if tag_name == wanted and tag_string is not None:
-                    return tag_string.decode()
-    return None
+                        value = webm[fstart:fend].decode()
+                    elif fid == TAG_BINARY:
+                        value = bytes(webm[fstart:fend])
+                if tag_name is not None and value is not None:
+                    out[tag_name] = value
+    return out
+
+
+def read_tag(webm: bytes, name: str) -> str | None:
+    """Return the TagString of the SimpleTag with TagName == name, or None."""
+    value = read_all_tags(webm).get(name)
+    return value if isinstance(value, str) else None

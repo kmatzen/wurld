@@ -1,4 +1,4 @@
-# Wurld — posed sensor video, v0.1 (working title)
+# Wurld — posed sensor video, v0.2 (working title)
 
 Wurld is a container profile for **posed sensor video**: RGB video + per-frame
 camera pose + intrinsics + timestamps + bit-exact auxiliary signals (metric depth,
@@ -160,17 +160,94 @@ When a chromapakz signal already carries a `quant` spec (e.g. `inverse-depth`), 
 wurld `value_map` MUST agree with it; the chromapakz spec is authoritative for
 decode, wurld's copy is for consumers that read metadata only.
 
-## 7. Compatibility & versioning
+## 7. Binary frame table (v0.2)
 
-- Unknown JSON fields MUST be ignored (forward compatibility).
-- `version` is `major.minor`; minor bumps are additive-only.
+For long sequences, the `frames` array MAY be replaced by a packed binary table in a
+second SimpleTag in the same Tags element:
+
+- `TagName` = `WURLD_FRAMES`, payload in **TagBinary** (0x4485), not TagString.
+- The JSON document then carries `"frames": []` and a descriptor:
+
+```json
+"frames_binary": { "version": 1, "count": 108000, "cameras": ["0", "1"] }
+```
+
+Record format v1 — little-endian, 45 bytes per frame, `count` records:
+
+| offset | type | field |
+|---|---|---|
+| 0 | u32 | `i` (video frame index) |
+| 4 | u32 | camera index into `frames_binary.cameras` |
+| 8 | f64 | `t` (seconds) |
+| 16 | 4 × f32 | `q_wxyz` |
+| 32 | 3 × f32 | `tr` (meters) |
+| 44 | u8 | flags: bit 0 = `pose_valid` |
+
+When both a non-empty JSON `frames` array and a `WURLD_FRAMES` tag are present,
+the binary table is authoritative. Per-frame intrinsics overrides (§8.2) require the
+JSON form; writers MUST NOT use the binary table with overridden frames.
+
+## 8. Rigs, per-frame intrinsics, IMU (v0.2)
+
+### 8.1 `rigs`
+
+Calibrated multi-camera rigs are described as **camera-to-rig** transforms:
+
+```json
+"rigs": {
+  "rig0": {
+    "cameras": { "0": { "q_wxyz": [1,0,0,0], "tr": [0,0,0] },
+                 "1": { "q_wxyz": [1,0,0,0], "tr": [0.12,0,0] } },
+    "description": "stereo pair, left camera is rig origin"
+  }
+}
+```
+
+Frame poses remain camera-to-world for the frame's own camera; rigs are calibration
+metadata letting consumers derive the other cameras' poses
+(`c2w_other = c2w_frame @ inv(rig[cam_frame]) @ rig[cam_other]`).
+
+### 8.2 Per-frame intrinsics override
+
+A JSON frame entry MAY carry `"params": [...]` — a full replacement for its camera's
+`params` (same model, same length) for that frame only (zoom, autofocus drift).
+
+### 8.3 IMU streams
+
+```json
+"imu": {
+  "imu0": { "rate_hz": 200.0, "count": 720000,
+            "extrinsics": { "q_wxyz": [1,0,0,0], "tr": [0,0,0] },
+            "description": "device IMU, extrinsics = imu-to-camera \"0\"" }
+}
+```
+
+Samples live in one SimpleTag per stream, `TagName` = `WURLD_IMU_<id>`, TagBinary
+payload of `count` little-endian 32-byte records:
+
+| offset | type | field |
+|---|---|---|
+| 0 | f64 | `t` (seconds, same clock as frame timestamps) |
+| 8 | 3 × f32 | gyro x,y,z (rad/s) |
+| 20 | 3 × f32 | accel x,y,z (m/s², includes gravity) |
+
+`extrinsics` is the imu-to-camera transform for the camera named in `description`
+convention `"0"` unless stated; axes follow the canonical camera convention (§3).
+
+## 9. Compatibility & versioning
+
+- Unknown JSON fields and unknown `WURLD_*` tags MUST be ignored (forward
+  compatibility).
+- `version` is `major.minor`; minor bumps are additive-only. v0.1 readers see v0.2
+  files as valid (binary-frame files appear to have zero posed frames to a v0.1
+  reader — writers targeting maximum compatibility should prefer JSON frames below
+  ~100k frames).
 - A file with no `WURLD` tag is a plain chromapakz file; libraries SHOULD read it
   as a sequence with no poses.
-- Multi-camera rigs, IMU streams, per-frame intrinsics overrides, binary frame tables
-  (for >10^6 frames), and interleaved streaming pose tracks are reserved for v0.2+;
-  the JSON layout above is designed so all of these are additive.
+- Interleaved streaming pose tracks (poses muxed into clusters for live capture) are
+  reserved for v0.3.
 
-## 8. Non-goals
+## 10. Non-goals
 
 - Not an editing/composition format (that's USD's job).
 - Not a delivery format for reconstructed 3D (that's glTF/3D Tiles/splats).

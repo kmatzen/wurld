@@ -8,6 +8,7 @@ cameras, per-frame poses/timestamps, signal semantics, and world metadata.
 from __future__ import annotations
 
 import json
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,7 +17,14 @@ import numpy as np
 
 from . import conventions, ebml
 
-FORMAT_VERSION = "0.1"
+FORMAT_VERSION = "0.2"
+
+# Binary frame table (SPEC §7): u32 i, u32 camera idx, f64 t, 4×f32 q, 3×f32 tr, u8 flags
+_FRAME_RECORD = struct.Struct("<IId4f3fB")
+# IMU sample (SPEC §8.3): f64 t, 3×f32 gyro, 3×f32 accel
+_IMU_RECORD = struct.Struct("<d3f3f")
+# Above this many frames, write() with frames_format="auto" switches to binary.
+_BINARY_FRAMES_THRESHOLD = 10_000
 
 CONVENTIONS = {
     "camera_axes": "RDF",
@@ -84,6 +92,7 @@ class Frame:
     q_wxyz: tuple[float, float, float, float] | None = None
     tr: tuple[float, float, float] | None = None
     pose_valid: bool = True
+    params: list[float] | None = None  # per-frame intrinsics override (SPEC §8.2)
 
     def __post_init__(self):
         if self.pose_valid and (self.q_wxyz is None or self.tr is None):
@@ -102,6 +111,8 @@ class Frame:
             d["tr"] = [float(v) for v in self.tr]
         else:
             d["pose_valid"] = False
+        if self.params is not None:
+            d["params"] = [float(v) for v in self.params]
         return d
 
     @classmethod
@@ -113,7 +124,90 @@ class Frame:
             q_wxyz=tuple(d["q_wxyz"]) if "q_wxyz" in d else None,
             tr=tuple(d["tr"]) if "tr" in d else None,
             pose_valid=d.get("pose_valid", True),
+            params=list(d["params"]) if "params" in d else None,
         )
+
+
+def pack_frames(frames: list[Frame], camera_keys: list[str]) -> bytes:
+    """Frames -> binary table (SPEC §7). Requires no per-frame intrinsics."""
+    cam_index = {k: i for i, k in enumerate(camera_keys)}
+    out = bytearray()
+    for f in frames:
+        if f.params is not None:
+            raise ValueError(
+                f"frame {f.i}: per-frame intrinsics require the JSON frame form (SPEC §7)"
+            )
+        q = f.q_wxyz if f.pose_valid else (1.0, 0.0, 0.0, 0.0)
+        tr = f.tr if f.pose_valid else (0.0, 0.0, 0.0)
+        out += _FRAME_RECORD.pack(
+            f.i, cam_index[f.camera], f.t, *q, *tr, 1 if f.pose_valid else 0
+        )
+    return bytes(out)
+
+
+def unpack_frames(buf: bytes, camera_keys: list[str]) -> list[Frame]:
+    if len(buf) % _FRAME_RECORD.size:
+        raise ValueError(
+            f"WURLD_FRAMES length {len(buf)} is not a multiple of {_FRAME_RECORD.size}"
+        )
+    frames = []
+    for rec in _FRAME_RECORD.iter_unpack(buf):
+        i, cam, t, qw, qx, qy, qz, tx, ty, tz, flags = rec
+        valid = bool(flags & 1)
+        frames.append(
+            Frame(
+                i=i,
+                t=t,
+                camera=camera_keys[cam],
+                q_wxyz=(qw, qx, qy, qz) if valid else None,
+                tr=(tx, ty, tz) if valid else None,
+                pose_valid=valid,
+            )
+        )
+    return frames
+
+
+@dataclass
+class ImuStream:
+    """samples: (N, 7) float64 array — [t, gyro xyz (rad/s), accel xyz (m/s^2)]."""
+
+    id: str
+    samples: np.ndarray
+    rate_hz: float | None = None
+    extrinsics: dict | None = None  # {"q_wxyz": [...], "tr": [...]} imu-to-camera
+    description: str = ""
+
+    def __post_init__(self):
+        self.samples = np.asarray(self.samples, dtype=np.float64)
+        if self.samples.ndim != 2 or self.samples.shape[1] != 7:
+            raise ValueError(f"imu {self.id}: samples must be (N, 7) [t, gyro, accel]")
+
+    def pack(self) -> bytes:
+        out = bytearray()
+        for row in self.samples:
+            out += _IMU_RECORD.pack(row[0], *row[1:4].astype(np.float32), *row[4:7].astype(np.float32))
+        return bytes(out)
+
+    @classmethod
+    def unpack(cls, stream_id: str, buf: bytes, meta: dict) -> "ImuStream":
+        if len(buf) % _IMU_RECORD.size:
+            raise ValueError(f"imu {stream_id}: payload not a multiple of {_IMU_RECORD.size}")
+        rows = [list(rec) for rec in _IMU_RECORD.iter_unpack(buf)]
+        return cls(
+            id=stream_id,
+            samples=np.array(rows, dtype=np.float64).reshape(-1, 7),
+            rate_hz=meta.get("rate_hz"),
+            extrinsics=meta.get("extrinsics"),
+            description=meta.get("description", ""),
+        )
+
+    def to_json(self) -> dict:
+        d = {"count": int(self.samples.shape[0]), "description": self.description}
+        if self.rate_hz is not None:
+            d["rate_hz"] = float(self.rate_hz)
+        if self.extrinsics is not None:
+            d["extrinsics"] = self.extrinsics
+        return d
 
 
 @dataclass
@@ -160,7 +254,9 @@ class Sequence:
     signals: list[SignalMeta]
     world: dict
     probe: dict
-    _bytes: bytes = field(repr=False)
+    rigs: dict = field(default_factory=dict)
+    imu: dict[str, ImuStream] = field(default_factory=dict)
+    _bytes: bytes = field(default=b"", repr=False)
     _decoded: dict | None = field(default=None, repr=False)
 
     @property
@@ -195,18 +291,34 @@ class Sequence:
             raw = raw[frame_index]
         return meta.apply(raw)
 
-    def K(self, camera_id: str = "0") -> np.ndarray:
-        return self.cameras[camera_id].K
+    def K(self, camera_id: str = "0", frame_index: int | None = None) -> np.ndarray:
+        """Intrinsics for a camera, honoring a per-frame override when given."""
+        cam = self.cameras[camera_id]
+        if frame_index is not None and self.frames[frame_index].params is not None:
+            cam = Camera(cam.model, cam.width, cam.height, self.frames[frame_index].params)
+        return cam.K
 
     def c2w(self, frame_index: int) -> np.ndarray:
         return self.frames[frame_index].c2w
 
+    def rig_c2w(self, frame_index: int, camera_id: str, rig_id: str | None = None) -> np.ndarray:
+        """Derive another rig camera's c2w from this frame's pose (SPEC §8.1)."""
+        rig_id = rig_id or next(iter(self.rigs))
+        rig = self.rigs[rig_id]["cameras"]
+        f = self.frames[frame_index]
+
+        def cam2rig(key):
+            e = rig[key]
+            return conventions.pose_to_matrix(e["q_wxyz"], e["tr"])
+
+        return f.c2w @ conventions.invert_pose(cam2rig(f.camera)) @ cam2rig(camera_id)
+
     def to_document(self) -> dict:
-        return _document(self.cameras, self.frames, self.signals, self.world)
+        return _document(self.cameras, self.frames, self.signals, self.world, self.rigs, self.imu)
 
 
-def _document(cameras, frames, signals, world) -> dict:
-    return {
+def _document(cameras, frames, signals, world, rigs=None, imu=None) -> dict:
+    doc = {
         "format": "wurld",
         "version": FORMAT_VERSION,
         "conventions": dict(CONVENTIONS),
@@ -215,6 +327,25 @@ def _document(cameras, frames, signals, world) -> dict:
         "signals": [s.to_json() for s in signals],
         "frames": [f.to_json() for f in frames],
     }
+    if rigs:
+        doc["rigs"] = rigs
+    if imu:
+        doc["imu"] = {k: s.to_json() for k, s in imu.items()}
+    return doc
+
+
+def _validate_rigs(rigs: dict, cameras: dict) -> list[str]:
+    problems = []
+    for rig_id, rig in rigs.items():
+        for cam_key, e in rig.get("cameras", {}).items():
+            if cam_key not in cameras:
+                problems.append(f"rig {rig_id}: unknown camera {cam_key!r}")
+            q = np.asarray(e.get("q_wxyz", []), dtype=np.float64)
+            if q.shape != (4,) or abs(np.linalg.norm(q) - 1.0) > 1e-3:
+                problems.append(f"rig {rig_id}/{cam_key}: q_wxyz missing or not unit")
+            if len(e.get("tr", [])) != 3:
+                problems.append(f"rig {rig_id}/{cam_key}: tr must be length 3")
+    return problems
 
 
 def write(
@@ -227,6 +358,9 @@ def write(
     specs: dict[str, dict] | None = None,
     signal_meta: list[SignalMeta] | None = None,
     world: dict | None = None,
+    rigs: dict | None = None,
+    imu: list[ImuStream] | None = None,
+    frames_format: str = "auto",  # "auto" | "json" | "binary"
     fps: float = 30,
     rgb_kbps: int = 2000,
     validate: bool = True,
@@ -235,12 +369,26 @@ def write(
 
     ``signals``/``specs`` pass straight to chromapakz (bit-exact uint16 planes);
     ``signal_meta`` attaches roles/value maps; ``frames`` carry canonical-convention
-    poses (RDF, camera-to-world, wxyz) and sensor timestamps.
+    poses (RDF, camera-to-world, wxyz) and sensor timestamps. ``frames_format``
+    "binary" packs frames into a WURLD_FRAMES tag (SPEC §7); "auto" does so
+    beyond 10k frames when no frame carries a per-frame intrinsics override.
     """
     path = Path(path)
     world = dict(world or {"metric_scale": True, "gravity_in_world": None, "description": ""})
     signal_meta = list(signal_meta or [])
+    rigs = dict(rigs or {})
+    imu_streams = {s.id: s for s in (imu or [])}
     frames = sorted(frames, key=lambda f: f.i)
+
+    has_overrides = any(f.params is not None for f in frames)
+    if frames_format == "auto":
+        use_binary = len(frames) > _BINARY_FRAMES_THRESHOLD and not has_overrides
+    elif frames_format == "binary":
+        use_binary = True
+    elif frames_format == "json":
+        use_binary = False
+    else:
+        raise ValueError(f"frames_format must be auto|json|binary, got {frames_format!r}")
 
     n_video = None
     for arr in (signals or {}).values():
@@ -265,17 +413,36 @@ def write(
             if rgb is not None and (cam.width != rgb.shape[2] or cam.height != rgb.shape[1]):
                 problems.append(
                     f"camera calibrated at {cam.width}x{cam.height} but video is "
-                    f"{rgb.shape[2]}x{rgb.shape[1]} (SPEC v0.1 requires equality)"
+                    f"{rgb.shape[2]}x{rgb.shape[1]} (SPEC requires equality)"
                 )
+        for f in frames:
+            if f.params is not None and len(f.params) != len(cameras[f.camera].params):
+                problems.append(
+                    f"frame {f.i}: params override length {len(f.params)} != "
+                    f"camera model {cameras[f.camera].model}"
+                )
+                break
+        problems += _validate_rigs(rigs, cameras)
         if problems:
             raise ValueError("invalid wurld data:\n  " + "\n  ".join(problems))
 
     # Video-track fps is presentation timing only (frame `t` values are the
     # authoritative timestamps); chromapakz requires an integer rate.
     data = cz.encode(signals or {}, specs=specs, rgb=rgb, fps=max(1, round(fps)), rgb_kbps=rgb_kbps)
-    doc = _document(cameras, frames, signal_meta, world)
-    tagged = ebml.append_tag(data, "WURLD", json.dumps(doc, separators=(",", ":")))
-    path.write_bytes(tagged)
+
+    tags: dict[str, str | bytes] = {}
+    if use_binary:
+        camera_keys = sorted(cameras)
+        doc = _document(cameras, [], signal_meta, world, rigs, imu_streams)
+        doc["frames_binary"] = {"version": 1, "count": len(frames), "cameras": camera_keys}
+        tags["WURLD_FRAMES"] = pack_frames(frames, camera_keys)
+    else:
+        doc = _document(cameras, frames, signal_meta, world, rigs, imu_streams)
+    tags["WURLD"] = json.dumps(doc, separators=(",", ":"))
+    for stream_id, stream in imu_streams.items():
+        tags[f"WURLD_IMU_{stream_id}"] = stream.pack()
+
+    path.write_bytes(ebml.append_tags(data, tags))
     return path
 
 
@@ -284,19 +451,43 @@ def read(path: str | Path) -> Sequence:
     path = Path(path)
     data = path.read_bytes()
     probe = cz.probe(data)
-    raw = ebml.read_tag(data, "WURLD")
-    if raw is None:
+    all_tags = ebml.read_all_tags(data)
+    raw = all_tags.get("WURLD")
+    if not isinstance(raw, str):
         doc = {"cameras": {}, "frames": [], "signals": [], "world": {}}
     else:
         doc = json.loads(raw)
         if doc.get("format") != "wurld":
             raise ValueError(f"{path}: WURLD tag present but format={doc.get('format')!r}")
+
+    frames = [Frame.from_json(f) for f in doc.get("frames", [])]
+    fb = doc.get("frames_binary")
+    if fb is not None:
+        buf = all_tags.get("WURLD_FRAMES")
+        if not isinstance(buf, bytes):
+            raise ValueError(f"{path}: frames_binary declared but WURLD_FRAMES tag missing")
+        if fb.get("version", 1) != 1:
+            raise ValueError(f"{path}: unsupported frames_binary version {fb.get('version')}")
+        frames = unpack_frames(buf, list(fb["cameras"]))
+        if len(frames) != fb.get("count", len(frames)):
+            raise ValueError(
+                f"{path}: WURLD_FRAMES has {len(frames)} records, expected {fb.get('count')}"
+            )
+
+    imu = {}
+    for stream_id, meta in doc.get("imu", {}).items():
+        buf = all_tags.get(f"WURLD_IMU_{stream_id}")
+        if isinstance(buf, bytes):
+            imu[stream_id] = ImuStream.unpack(stream_id, buf, meta)
+
     return Sequence(
         path=path,
         cameras={k: Camera.from_json(v) for k, v in doc.get("cameras", {}).items()},
-        frames=[Frame.from_json(f) for f in doc.get("frames", [])],
+        frames=frames,
         signals=[SignalMeta.from_json(s) for s in doc.get("signals", [])],
         world=doc.get("world", {}),
+        rigs=doc.get("rigs", {}),
+        imu=imu,
         probe=probe,
         _bytes=data,
     )
@@ -320,6 +511,8 @@ def info(path: str | Path) -> dict:
             "cameras": {k: c.to_json() for k, c in seq.cameras.items()},
             "signals": [s.to_json() for s in seq.signals],
             "world": seq.world,
+            "rigs": seq.rigs,
+            "imu": {k: s.to_json() for k, s in seq.imu.items()},
             "t_start": seq.frames[0].t if seq.frames else None,
             "t_end": seq.frames[-1].t if seq.frames else None,
         },

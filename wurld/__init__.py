@@ -8,6 +8,7 @@ from .container import (
     CAMERA_MODELS,
     Camera,
     Frame,
+    ImuStream,
     Sequence,
     SignalMeta,
     info,
@@ -16,11 +17,12 @@ from .container import (
 )
 from . import conventions
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Camera",
     "Frame",
+    "ImuStream",
     "Sequence",
     "SignalMeta",
     "CAMERA_MODELS",

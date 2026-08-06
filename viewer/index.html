@@ -92,8 +92,10 @@ function* ebmlChildren(b, pos, end) {
     pos = stop;
   }
 }
-function readWurldTag(bytes) {
-  const b = bytes;
+const TAG_BINARY = 0x4485;
+function readWurldTags(bytes) {
+  // All SimpleTags in the file: TagString entries as strings, TagBinary as Uint8Array.
+  const b = bytes, out = {};
   for (const [id, start, end] of ebmlChildren(b, 0, b.length)) {
     if (id !== SEGMENT) continue;
     for (const [cid, cs, ce] of ebmlChildren(b, start, end)) {
@@ -102,17 +104,38 @@ function readWurldTag(bytes) {
         if (tid !== TAG) continue;
         for (const [sid, ss, se] of ebmlChildren(b, ts, te)) {
           if (sid !== SIMPLE_TAG) continue;
-          let name = null, str = null;
+          let name = null, value = null;
           for (const [fid, fs, fe] of ebmlChildren(b, ss, se)) {
             if (fid === TAG_NAME) name = new TextDecoder().decode(b.subarray(fs, fe));
-            if (fid === TAG_STRING) str = b.subarray(fs, fe);
+            if (fid === TAG_STRING) value = new TextDecoder().decode(b.subarray(fs, fe));
+            if (fid === TAG_BINARY) value = b.subarray(fs, fe);
           }
-          if (name === 'WURLD' && str) return JSON.parse(new TextDecoder().decode(str));
+          if (name !== null && value !== null) out[name] = value;
         }
       }
     }
   }
-  return null;
+  return out;
+}
+
+const FRAME_RECORD_SIZE = 45; // u32 i, u32 cam, f64 t, 4xf32 q, 3xf32 tr, u8 flags
+function unpackBinaryFrames(buf, cameraKeys) {
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const frames = [];
+  for (let o = 0; o + FRAME_RECORD_SIZE <= buf.byteLength; o += FRAME_RECORD_SIZE) {
+    const valid = (dv.getUint8(o + 44) & 1) === 1;
+    const f = {
+      i: dv.getUint32(o, true),
+      camera: cameraKeys[dv.getUint32(o + 4, true)],
+      t: dv.getFloat64(o + 8, true),
+    };
+    if (valid) {
+      f.q_wxyz = [0, 1, 2, 3].map(k => dv.getFloat32(o + 16 + 4 * k, true));
+      f.tr = [0, 1, 2].map(k => dv.getFloat32(o + 32 + 4 * k, true));
+    } else f.pose_valid = false;
+    frames.push(f);
+  }
+  return frames;
 }
 
 // ---------- tiny mat4 ----------
@@ -176,7 +199,11 @@ function depthToMeters(u16, out) {
 // ---------- loading ----------
 async function loadBytes(bytes, name) {
   document.getElementById('drop').classList.add('hidden');
-  const doc = readWurldTag(bytes);
+  const tags = readWurldTags(bytes);
+  const doc = typeof tags.WURLD === 'string' ? JSON.parse(tags.WURLD) : null;
+  if (doc?.frames_binary && tags.WURLD_FRAMES instanceof Uint8Array) {
+    doc.frames = unpackBinaryFrames(tags.WURLD_FRAMES, doc.frames_binary.cameras);
+  }
   state.doc = doc;
   state.poses = new Map(); state.cloudCache = new Map(); state.frames = [];
   if (doc) {

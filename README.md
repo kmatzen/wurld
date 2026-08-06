@@ -32,10 +32,11 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 # inspect
 .venv/bin/wurld info demo.wl.webm
 
-# convert real datasets (auto-detects TUM / transforms.json / COLMAP layouts)
+# convert real datasets (auto-detects TUM / transforms.json / COLMAP / Stray Scanner)
 .venv/bin/wurld convert path/to/rgbd_dataset_freiburg1_desk desk.wl.webm
 .venv/bin/wurld convert path/to/transforms.json scene.wl.webm
 .venv/bin/wurld convert path/to/colmap_project scene.wl.webm --images path/to/images
+.venv/bin/wurld convert path/to/stray_capture scan.wl.webm       # needs ffmpeg on PATH
 
 # extract back out
 .venv/bin/wurld extract demo.wl.webm out/ --format tum        # or transforms | colmap
@@ -50,9 +51,14 @@ seq = wl.read("demo.wl.webm")
 seq.rgb                  # (T, H, W, 4) uint8, lazily decoded
 seq.depth_meters(0)      # (H, W) float, NaN = invalid
 seq.c2w(0)               # 4x4 camera-to-world (RDF, meters)
-seq.K("0")               # 3x3 intrinsics
+seq.K("0")               # 3x3 intrinsics (K("0", frame_index=i) honors overrides)
 seq.frames[0].t          # sensor timestamp (authoritative, may be non-uniform)
+seq.rigs                 # camera-to-rig calibration; seq.rig_c2w(i, "1") derives poses
+seq.imu["imu0"].samples  # (N, 7) [t, gyro xyz, accel xyz]
 ```
+
+Long sequences (>10k frames) automatically pack poses into a binary frame table
+(45 bytes/frame; SPEC §7) — `wl.write(..., frames_format="binary")` forces it.
 
 ## Browser viewer
 
@@ -79,16 +85,28 @@ file playing in a plain `<video>` element.
 
 ## Status / verified
 
-- 17/17 tests pass: depth round-trips bit-exactly through VP9; poses, timestamps, and
+- 29/29 tests pass: depth round-trips bit-exactly through VP9; poses, timestamps, and
   intrinsics survive every converter round trip; TUM native-unit depth is bit-exact
-  end to end.
+  end to end; binary frame tables, rigs, IMU streams, and both Stray resampling
+  policies covered.
 - `ffmpeg`/`ffprobe` read and fully decode wurld files with zero warnings (all
-  three VP9 streams); the WURLD tag is invisible to standard demuxers.
-- Viewer verified in Chrome (native WebCodecs decode, no WASM).
+  three VP9 streams); the WURLD tags are invisible to standard demuxers.
+- Viewer verified in Chrome (native WebCodecs decode, no WASM), including binary
+  frame tables.
 
-## Roadmap (SPEC v0.2+)
+## v0.2 (current)
 
-Multi-camera rigs, IMU track, per-frame intrinsics, binary frame tables for 10^6+
-frames, interleaved pose track for live streaming; converters for Record3D, Polycam,
-Stray Scanner, ARKit straight-from-device; LeRobot / nerfstudio / Foxglove
-integrations; ffmpeg demuxer patch.
+- **Binary frame tables** (`WURLD_FRAMES` TagBinary, 45 B/frame) for 10^6+-frame
+  sequences; automatic beyond 10k frames.
+- **Multi-camera rigs**: camera-to-rig calibration block + `rig_c2w()` derivation.
+- **Per-frame intrinsics overrides** (zoom / autofocus drift).
+- **IMU streams**: packed 32 B/sample gyro+accel tags with extrinsics.
+- **Stray Scanner importer** (first real capture-app source; ffmpeg-based, ARKit
+  RUB→RDF pose conversion, honest RGB/depth resolution policy). *Validated against
+  synthetic fixtures — a real capture to confirm conventions is welcome.*
+
+## Roadmap (v0.3+)
+
+Interleaved pose track for live capture/streaming; Record3D importer (awaiting a real
+.r3d sample to validate against), Polycam raw, ARKit straight-from-device; LeRobot /
+nerfstudio / Foxglove integrations; ffmpeg demuxer patch.
