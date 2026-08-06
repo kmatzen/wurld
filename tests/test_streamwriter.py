@@ -122,6 +122,33 @@ def test_streamwriter_ffmpeg_valid(scene, tmp_path):
     assert res.stderr.strip() == ""
 
 
+def test_streamwriter_rgb_only(scene, tmp_path):
+    """Pose-only capture: RGB + camera poses, no depth (needs ChromaPakZ #44)."""
+    parts = []
+    w = StreamWriter(
+        parts.append,
+        cameras=scene["cameras"],
+        world={"metric_scale": True, "description": "pose-only take"},
+        has_rgb=True,
+    )
+    for i, f in enumerate(scene["frames"]):
+        w.add_frame(f, rgb=scene["rgba"][i])
+    summary = w.finish()
+    assert summary["frames"] == 10
+
+    p = tmp_path / "poseonly.wl.webm"
+    p.write_bytes(b"".join(parts))
+    seq = wl.read(p)
+    assert len(seq.frames) == 10
+    assert seq.signals == [] and seq.probe["signals"] == []
+    assert seq.rgb.shape == (10, 96, 128, 4)
+    for i in (0, 9):
+        assert seq.frames[i].t == scene["frames"][i].t
+        assert np.allclose(seq.frames[i].c2w, scene["frames"][i].c2w, atol=1e-6)
+    with pytest.raises(ValueError, match="no signal with role 'depth'"):
+        seq.depth_meters(0)
+
+
 def test_streamwriter_rejects_bad_quaternion(scene):
     parts = []
     # note: chromapakz create_encoder requires >=1 signal even with has_rgb

@@ -129,6 +129,8 @@ file playing in a plain `<video>` element.
 
   Verified: bit-exact depth through the live path, IMU chunk concatenation,
   progressive parse parity, crash-truncation survival, and ffmpeg-clean output.
+  Pose-only takes (RGB + poses, no depth) work too — enabled upstream by
+  [ChromaPakZ #44](https://github.com/kmatzen/ChromaPakZ/pull/44).
 
 ## v0.2
 
