@@ -94,7 +94,27 @@ file playing in a plain `<video>` element.
 - Viewer verified in Chrome (native WebCodecs decode, no WASM), including binary
   frame tables.
 
-## v0.2 (current)
+## v0.3 (current): fully streamable playback and recording
+
+- **Streaming layout** (SPEC §9): all wurld metadata — calibration *and* every
+  pose — now lands **before the first Cluster**; Cues are rebuilt for the new
+  offsets. A progressive reader has full pose data before the first video byte;
+  ffmpeg still decodes and *seeks* cleanly.
+- **Live recording**: `viewer/wurld.js` provides `WurldRecorder` (wraps
+  chromapakz's streaming encoder, weaves `WURLD_POSES` chunks before each
+  Cluster, consolidates a pose table on finish) and `WurldLivePlayer`
+  (extracts pose tags from the byte stream, forwards clean video bytes to the
+  network decoder). A crash-truncated recording is still a valid, fully-posed file
+  up to its last flushed chunk.
+- **`viewer/live.html`**: record → stream → play in one page — the player consumes
+  only the byte stream and reconstructs the point cloud live (verified in Chrome:
+  46/46 frames + poses received during recording; finalized file passes buffered
+  decode).
+- **Python `wurld.stream.StreamReader`**: incremental parser for live/growing
+  streams; batch `wl.read()` also accepts crash-truncated live files via chunk
+  concatenation.
+
+## v0.2
 
 - **Binary frame tables** (`WURLD_FRAMES` TagBinary, 45 B/frame) for 10^6+-frame
   sequences; automatic beyond 10k frames.
@@ -105,8 +125,10 @@ file playing in a plain `<video>` element.
   RUB→RDF pose conversion, honest RGB/depth resolution policy). *Validated against
   synthetic fixtures — a real capture to confirm conventions is welcome.*
 
-## Roadmap (v0.3+)
+## Roadmap (v0.4+)
 
-Interleaved pose track for live capture/streaming; Record3D importer (awaiting a real
-.r3d sample to validate against), Polycam raw, ARKit straight-from-device; LeRobot /
-nerfstudio / Foxglove integrations; ffmpeg demuxer patch.
+SeekHead for efficient range-request access (COPC-style static hosting); Python live
+recording (needs a streaming encode API in chromapakz Python); Record3D importer
+(awaiting a real .r3d sample to validate against), Polycam raw, ARKit
+straight-from-device; LeRobot / nerfstudio / Foxglove integrations; ffmpeg demuxer
+patch.

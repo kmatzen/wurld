@@ -17,7 +17,7 @@ import numpy as np
 
 from . import conventions, ebml
 
-FORMAT_VERSION = "0.2"
+FORMAT_VERSION = "0.3"
 
 # Binary frame table (SPEC §7): u32 i, u32 camera idx, f64 t, 4×f32 q, 3×f32 tr, u8 flags
 _FRAME_RECORD = struct.Struct("<IId4f3fB")
@@ -435,14 +435,17 @@ def write(
         camera_keys = sorted(cameras)
         doc = _document(cameras, [], signal_meta, world, rigs, imu_streams)
         doc["frames_binary"] = {"version": 1, "count": len(frames), "cameras": camera_keys}
+        tags["WURLD"] = json.dumps(doc, separators=(",", ":"))
         tags["WURLD_FRAMES"] = pack_frames(frames, camera_keys)
     else:
         doc = _document(cameras, frames, signal_meta, world, rigs, imu_streams)
-    tags["WURLD"] = json.dumps(doc, separators=(",", ":"))
+        tags["WURLD"] = json.dumps(doc, separators=(",", ":"))
     for stream_id, stream in imu_streams.items():
         tags[f"WURLD_IMU_{stream_id}"] = stream.pack()
 
-    path.write_bytes(ebml.append_tags(data, tags))
+    # Streaming layout (SPEC §9): all metadata lands before the first Cluster,
+    # so a progressive reader has calibration and every pose ahead of the video.
+    path.write_bytes(ebml.insert_header_tags(data, tags))
     return path
 
 
@@ -460,19 +463,25 @@ def read(path: str | Path) -> Sequence:
         if doc.get("format") != "wurld":
             raise ValueError(f"{path}: WURLD tag present but format={doc.get('format')!r}")
 
-    frames = [Frame.from_json(f) for f in doc.get("frames", [])]
+    # Pose precedence (SPEC §9): consolidated table > streamed chunks > JSON array.
     fb = doc.get("frames_binary")
-    if fb is not None:
-        buf = all_tags.get("WURLD_FRAMES")
-        if not isinstance(buf, bytes):
-            raise ValueError(f"{path}: frames_binary declared but WURLD_FRAMES tag missing")
-        if fb.get("version", 1) != 1:
+    camera_keys = list(fb["cameras"]) if fb and "cameras" in fb else sorted(doc.get("cameras", {}))
+    table = all_tags.get("WURLD_FRAMES")
+    chunks = all_tags.get("WURLD_POSES")
+    if isinstance(table, bytes):
+        if fb is not None and fb.get("version", 1) != 1:
             raise ValueError(f"{path}: unsupported frames_binary version {fb.get('version')}")
-        frames = unpack_frames(buf, list(fb["cameras"]))
-        if len(frames) != fb.get("count", len(frames)):
+        frames = unpack_frames(table, camera_keys)
+        if fb is not None and len(frames) != fb.get("count", len(frames)):
             raise ValueError(
                 f"{path}: WURLD_FRAMES has {len(frames)} records, expected {fb.get('count')}"
             )
+    elif isinstance(chunks, bytes):
+        frames = unpack_frames(chunks, camera_keys)
+    else:
+        if fb is not None:
+            raise ValueError(f"{path}: frames_binary declared but WURLD_FRAMES tag missing")
+        frames = [Frame.from_json(f) for f in doc.get("frames", [])]
 
     imu = {}
     for stream_id, meta in doc.get("imu", {}).items():

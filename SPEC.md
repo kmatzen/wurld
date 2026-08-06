@@ -1,4 +1,4 @@
-# Wurld — posed sensor video, v0.2 (working title)
+# Wurld — posed sensor video, v0.3 (working title)
 
 Wurld is a container profile for **posed sensor video**: RGB video + per-frame
 camera pose + intrinsics + timestamps + bit-exact auxiliary signals (metric depth,
@@ -234,20 +234,62 @@ payload of `count` little-endian 32-byte records:
 `extrinsics` is the imu-to-camera transform for the camera named in `description`
 convention `"0"` unless stated; axes follow the canonical camera convention (§3).
 
-## 9. Compatibility & versioning
+## 9. Streaming layout (v0.3)
+
+The v0.2 layout (all metadata in one Tags element after the last Cluster) requires
+the whole file before any pose is readable. The v0.3 **streaming layout** makes both
+live recording and progressive playback possible; it is what writers SHOULD emit.
+
+Element order inside the Segment:
+
+```
+Info, Tracks, Tags(CHROMAPAKZ), Tags(WURLD)          <- header, before any Cluster
+[ Tags(WURLD_POSES chunk), Tags(WURLD_IMU_* chunk)?, Cluster ] ...
+Tags(WURLD_FRAMES [, WURLD_IMU_*]), Cues         <- finalize (absent if crashed)
+```
+
+- **Header tag**: the `WURLD` JSON document is written before the first Cluster
+  with `"frames": []` — cameras, conventions, signals, world, rigs, and IMU stream
+  descriptors (with `"count"` omitted or 0) are known at recording start; poses are
+  not. A progressive reader has full calibration before the first video byte.
+- **Pose chunks**: `WURLD_POSES` SimpleTags (TagBinary, §7 records) appear
+  repeatedly, each SHOULD directly precede the Cluster containing the frames it
+  describes. Repeated tags concatenate in file order; records MUST be ordered by
+  frame index across the whole file. Camera index resolves against the header
+  document's **sorted camera keys** (a `frames_binary.cameras` list, when present,
+  overrides). IMU chunks (`WURLD_IMU_<id>`, §8.3 records) interleave the same
+  way and also concatenate.
+- **Finalize**: on clean close, writers SHOULD append a consolidated
+  `WURLD_FRAMES` table (and consolidated IMU tags) so whole-file readers get one
+  contiguous table, then Cues. A recording that dies mid-stream is still a valid,
+  fully-posed file up to its last flushed chunk.
+- **Precedence** for readers: `WURLD_FRAMES` table, if present, is authoritative;
+  otherwise the concatenation of `WURLD_POSES` chunks; otherwise the JSON
+  `frames` array.
+- **Batch writers** (all poses known up front) MAY put the complete pose data in the
+  header region instead of chunking — a JSON `frames` array in the header document,
+  or a `WURLD_FRAMES` table directly after the header tag — and omit per-cluster
+  chunks. Playback is equally streamable: all poses arrive before the first Cluster.
+  The chunked form exists for live recording, where poses are not known at header
+  time.
+- Cues, when written, MUST reflect final Cluster offsets (writers that insert chunk
+  tags between Clusters rebuild Cues). A `SeekHead` for range-request access is
+  reserved for a future revision.
+
+## 10. Compatibility & versioning
 
 - Unknown JSON fields and unknown `WURLD_*` tags MUST be ignored (forward
   compatibility).
-- `version` is `major.minor`; minor bumps are additive-only. v0.1 readers see v0.2
+- `version` is `major.minor`; minor bumps are additive-only. v0.1 readers see v0.2+
   files as valid (binary-frame files appear to have zero posed frames to a v0.1
   reader — writers targeting maximum compatibility should prefer JSON frames below
   ~100k frames).
+- Repeated SimpleTag names: binary payloads concatenate in file order; for string
+  payloads the last occurrence wins.
 - A file with no `WURLD` tag is a plain chromapakz file; libraries SHOULD read it
   as a sequence with no poses.
-- Interleaved streaming pose tracks (poses muxed into clusters for live capture) are
-  reserved for v0.3.
 
-## 10. Non-goals
+## 11. Non-goals
 
 - Not an editing/composition format (that's USD's job).
 - Not a delivery format for reconstructed 3D (that's glTF/3D Tiles/splats).
