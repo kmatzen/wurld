@@ -67,76 +67,8 @@
 
 <script type="module">
 import { createDecoder, dequantizeInverseDepth } from '../node_modules/chromapakz/src/chromapakz.js';
-
-// ---------- minimal EBML: find the WURLD SimpleTag ----------
-const TAGS = 0x1254C367, TAG = 0x7373, SIMPLE_TAG = 0x67C8, TAG_NAME = 0x45A3,
-      TAG_STRING = 0x4487, SEGMENT = 0x18538067;
-
-function readVint(b, pos, keepMarker) {
-  const first = b[pos];
-  if (!first) throw new Error('bad vint');
-  let len = 1; for (let m = 0x80; !(first & m); m >>= 1) len++;
-  let val = keepMarker ? first : first & (0xff >> len);
-  for (let i = 1; i < len; i++) val = val * 256 + b[pos + i];
-  return [val, pos + len, len];
-}
-function* ebmlChildren(b, pos, end) {
-  while (pos < end) {
-    let id, size, sizeLen;
-    [id, pos] = readVint(b, pos, true);
-    [size, pos, sizeLen] = readVint(b, pos, false);
-    const unknown = size === Math.pow(2, 7 * sizeLen) - 1;
-    const stop = unknown ? end : pos + size;
-    yield [id, pos, stop];
-    if (unknown) return;
-    pos = stop;
-  }
-}
-const TAG_BINARY = 0x4485;
-function readWurldTags(bytes) {
-  // All SimpleTags in the file: TagString entries as strings, TagBinary as Uint8Array.
-  const b = bytes, out = {};
-  for (const [id, start, end] of ebmlChildren(b, 0, b.length)) {
-    if (id !== SEGMENT) continue;
-    for (const [cid, cs, ce] of ebmlChildren(b, start, end)) {
-      if (cid !== TAGS) continue;
-      for (const [tid, ts, te] of ebmlChildren(b, cs, ce)) {
-        if (tid !== TAG) continue;
-        for (const [sid, ss, se] of ebmlChildren(b, ts, te)) {
-          if (sid !== SIMPLE_TAG) continue;
-          let name = null, value = null;
-          for (const [fid, fs, fe] of ebmlChildren(b, ss, se)) {
-            if (fid === TAG_NAME) name = new TextDecoder().decode(b.subarray(fs, fe));
-            if (fid === TAG_STRING) value = new TextDecoder().decode(b.subarray(fs, fe));
-            if (fid === TAG_BINARY) value = b.subarray(fs, fe);
-          }
-          if (name !== null && value !== null) out[name] = value;
-        }
-      }
-    }
-  }
-  return out;
-}
-
-const FRAME_RECORD_SIZE = 45; // u32 i, u32 cam, f64 t, 4xf32 q, 3xf32 tr, u8 flags
-function unpackBinaryFrames(buf, cameraKeys) {
-  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  const frames = [];
-  for (let o = 0; o + FRAME_RECORD_SIZE <= buf.byteLength; o += FRAME_RECORD_SIZE) {
-    const valid = (dv.getUint8(o + 44) & 1) === 1;
-    const f = {
-      i: dv.getUint32(o, true),
-      camera: cameraKeys[dv.getUint32(o + 4, true)],
-      t: dv.getFloat64(o + 8, true),
-    };
-    if (valid) {
-      f.q_wxyz = [0, 1, 2, 3].map(k => dv.getFloat32(o + 16 + 4 * k, true));
-      f.tr = [0, 1, 2].map(k => dv.getFloat32(o + 32 + 4 * k, true));
-    } else f.pose_valid = false;
-    frames.push(f);
-  }
-  return frames;
-}
+import { ID, readWurldTags, unpackFrames as unpackBinaryFrames, readSeekHead,
+         segmentPayloadStart, collectTagsInRange } from './wurld.js';
 
 // ---------- tiny mat4 ----------
 const M = {
@@ -197,9 +129,8 @@ function depthToMeters(u16, out) {
 }
 
 // ---------- loading ----------
-async function loadBytes(bytes, name) {
+function applyMetadata(tags, headline) {
   document.getElementById('drop').classList.add('hidden');
-  const tags = readWurldTags(bytes);
   const doc = typeof tags.WURLD === 'string' ? JSON.parse(tags.WURLD) : null;
   if (doc?.frames_binary && tags.WURLD_FRAMES instanceof Uint8Array) {
     doc.frames = unpackBinaryFrames(tags.WURLD_FRAMES, doc.frames_binary.cameras);
@@ -209,33 +140,17 @@ async function loadBytes(bytes, name) {
   if (doc) {
     for (const f of doc.frames || []) {
       if (f.pose_valid === false) continue;
-      const R = quatToMat(f.q_wxyz), t = f.tr;
-      state.poses.set(f.i, { R, t, time: f.t, cam: f.camera ?? '0' });
+      state.poses.set(f.i, { R: quatToMat(f.q_wxyz), t: f.tr, time: f.t, cam: f.camera ?? '0' });
     }
     const cams = doc.cameras || {};
     state.camera = cams[Object.keys(cams)[0]] ?? null;
     const depthSig = (doc.signals || []).find(s => s.role === 'depth');
     state.depthMap = depthSig ? depthSig.value_map : null;
   }
-  const dec = createDecoder(bytes);
-  const W = dec.width, H = dec.height;
-  let n = 0;
-  const wantedDepthId = (doc?.signals || []).find(s => s.role === 'depth')?.id;
-  for await (const frame of dec) {
-    const rec = { rgb: frame.rgb ?? null, depth: null };
-    if (frame.signals) {
-      const depthId = wantedDepthId ?? Object.keys(frame.signals)[0];
-      if (depthId && frame.signals[depthId]) rec.depth = frame.signals[depthId].u16;
-    }
-    state.frames.push(rec); n++;
-  }
-  state.W = W; state.H = H;
   state.fps = doc?.frames?.length > 1
     ? Math.max(1, 1 / ((doc.frames.at(-1).t - doc.frames[0].t) / (doc.frames.length - 1)))
     : 30;
-
-  // center orbit on trajectory
-  if (state.poses.size) {
+  if (state.poses.size) {  // center orbit on trajectory
     let c = [0, 0, 0], k = 0, span = 1;
     for (const p of state.poses.values()) { c = [c[0]+p.t[0], c[1]+p.t[1], c[2]+p.t[2]]; k++; }
     c = c.map(v => v / k);
@@ -243,25 +158,103 @@ async function loadBytes(bytes, name) {
       span = Math.max(span, Math.hypot(p.t[0]-c[0], p.t[1]-c[1], p.t[2]-c[2]));
     state.orbit.target = c; state.orbit.dist = span * 2.5;
   }
+  showMeta(headline);
+  return doc;
+}
 
-  const scrub = document.getElementById('scrub');
-  scrub.max = Math.max(0, n - 1); scrub.value = 0; state.cur = 0;
-
-  const vid = document.getElementById('vid');
-  vid.src = URL.createObjectURL(new Blob([bytes], { type: 'video/webm' }));
-  vid.play().catch(() => {});
-
-  const K = state.camera ? camK(state.camera) : null;
+function showMeta(headline) {
+  const doc = state.doc;
   document.getElementById('meta').textContent = [
-    `file: ${name}  (${(bytes.length / 1e6).toFixed(2)} MB)`,
-    `video: ${W}x${H}, ${n} frames`,
+    headline,
     doc ? `wurld v${doc.version}; posed frames: ${state.poses.size}` : 'no WURLD tag (plain chromapakz)',
+    state.frames.length ? `video: ${state.W}x${state.H}, ${state.frames.length} frames decoded` : '',
     state.camera ? `camera: ${state.camera.model} [${state.camera.params.map(v => +v.toFixed(2)).join(', ')}]` : '',
     state.depthMap ? `depth map: ${JSON.stringify(state.depthMap)}` : 'no depth signal',
     doc?.world ? `world: ${JSON.stringify(doc.world)}` : '',
   ].filter(Boolean).join('\n');
+}
 
-  setFrame(0);
+function ingestFrame(frame) {
+  const wantedDepthId = (state.doc?.signals || []).find(s => s.role === 'depth')?.id;
+  const rec = { rgb: frame.rgb ?? null, depth: null };
+  if (frame.signals) {
+    const depthId = wantedDepthId ?? Object.keys(frame.signals)[0];
+    if (depthId && frame.signals[depthId]) rec.depth = frame.signals[depthId].u16;
+  }
+  state.frames.push(rec);
+  document.getElementById('scrub').max = Math.max(0, state.frames.length - 1);
+  if (state.frames.length === 1) setFrame(0);
+  else if (!state.playing) setFrame(state.cur);  // refresh the frame counter label
+}
+
+async function loadBytes(bytes, name) {
+  applyMetadata(readWurldTags(bytes), `file: ${name}  (${(bytes.length / 1e6).toFixed(2)} MB)`);
+  const dec = createDecoder(bytes);
+  state.W = dec.width; state.H = dec.height;
+  for await (const frame of dec) ingestFrame(frame);
+  const vid = document.getElementById('vid');
+  vid.src = URL.createObjectURL(new Blob([bytes], { type: 'video/webm' }));
+  vid.play().catch(() => {});
+  showMeta(`file: ${name}  (${(bytes.length / 1e6).toFixed(2)} MB)`);
+  setFrame(state.cur);
+}
+
+async function loadRemote(src) {
+  // Stage 1: ranged read of the head; SeekHead tells us the header extent (SPEC §9.1).
+  const PROBE = 8192;
+  const r = await fetch(src, { cache: 'no-store', headers: { Range: `bytes=0-${PROBE - 1}` } });
+  if (r.status !== 206) {  // no range support: fall back to a full download
+    const full = await fetch(src);
+    return loadBytes(new Uint8Array(await full.arrayBuffer()), src);
+  }
+  let head = new Uint8Array(await r.arrayBuffer());
+  const seeks = readSeekHead(head);
+  const firstCluster = seeks?.[ID.CLUSTER];
+  if (!firstCluster) {
+    const full = await fetch(src);
+    return loadBytes(new Uint8Array(await full.arrayBuffer()), src);
+  }
+  let fetched = head.length;
+  if (firstCluster > head.length) {
+    const r2 = await fetch(src, { cache: 'no-store', headers: { Range: `bytes=${head.length}-${firstCluster - 1}` } });
+    const more = new Uint8Array(await r2.arrayBuffer());
+    const joined = new Uint8Array(firstCluster);
+    joined.set(head); joined.set(more, head.length);
+    head = joined; fetched = head.length;
+  }
+  const headerBytes = head.subarray(0, firstCluster);
+  const tags = collectTagsInRange(headerBytes, segmentPayloadStart(headerBytes), firstCluster);
+  applyMetadata(tags, `ranged: ${src} — all poses from ${(fetched / 1024).toFixed(1)} KB, streaming video…`);
+
+  // The <video> element streams independently via the server's own range support.
+  const vid = document.getElementById('vid');
+  vid.src = src;
+  vid.play().catch(() => {});
+
+  // Stage 2: stream the rest through the network decoder; frames appear as they arrive.
+  const dec = createDecoder();
+  dec.push(headerBytes);
+  state.W = 0; state.H = 0;
+  const stream = await fetch(src, { cache: 'no-store', headers: { Range: `bytes=${firstCluster}-` } });
+  const reader = stream.body.getReader();
+  (async () => {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      dec.push(value);
+    }
+    dec.finish();
+  })();
+  (async () => {
+    while (!dec.ready) await new Promise(res => setTimeout(res, 25));
+    state.W = dec.width; state.H = dec.height;
+    for (;;) {
+      const frame = await dec.readFrame();
+      if (!frame) break;
+      ingestFrame(frame);
+    }
+    showMeta(`ranged: ${src} — poses first (${(fetched / 1024).toFixed(1)} KB), then video streamed`);
+  })().catch(e => console.error('remote decode', e));
 }
 
 function camK(cam) {
@@ -496,12 +489,10 @@ addEventListener('drop', async e => {
   if (f) loadBytes(new Uint8Array(await f.arrayBuffer()), f.name);
 });
 
-// ?src= auto-load (relative to this page)
+// ?src= auto-load (relative to this page): ranged/progressive when the server
+// supports it and the file has a SeekHead; full download otherwise.
 const src = new URLSearchParams(location.search).get('src');
-if (src) {
-  const r = await fetch(src);
-  if (r.ok) loadBytes(new Uint8Array(await r.arrayBuffer()), src);
-}
+if (src) loadRemote(src).catch(e => console.error('load', e));
 </script>
 </body>
 </html>

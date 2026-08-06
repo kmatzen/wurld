@@ -3,6 +3,7 @@
 Auto-detection (``detect(path)``):
 - directory with ``rgb.txt`` + ``groundtruth.txt``            -> TUM RGB-D
 - ``transforms.json`` file (or directory containing one)      -> nerfstudio/instant-ngp
+- ``*.r3d`` file                                              -> Record3D
 - directory with ``odometry.csv`` + ``camera_matrix.csv``     -> Stray Scanner
 - directory with ``keyframes/cameras`` (or ``corrected_cameras``) -> Polycam raw
 - directory with ``cameras.bin|txt`` + ``images.bin|txt``
@@ -18,6 +19,8 @@ def detect(path: str | Path) -> str | None:
     p = Path(path)
     if p.is_file() and p.name == "transforms.json":
         return "nerfstudio"
+    if p.is_file() and p.suffix.lower() == ".r3d":
+        return "record3d"
     if p.is_dir():
         if (p / "rgb.txt").exists() and (p / "groundtruth.txt").exists():
             return "tum"

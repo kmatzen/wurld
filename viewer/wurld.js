@@ -5,6 +5,7 @@ export const ID = {
   EBML_HEADER: 0x1A45DFA3, SEGMENT: 0x18538067, TAGS: 0x1254C367, TAG: 0x7373,
   SIMPLE_TAG: 0x67C8, TAG_NAME: 0x45A3, TAG_STRING: 0x4487, TAG_BINARY: 0x4485,
   CLUSTER: 0x1F43B675, CUES: 0x1C53BB6B,
+  SEEK_HEAD: 0x114D9B74, SEEK: 0x4DBB, SEEK_ID: 0x53AB, SEEK_POSITION: 0x53AC,
 };
 
 export function readVint(b, pos, keepMarker) {
@@ -66,6 +67,51 @@ export function buildTags(entries) {
     tags.push(el(ID.TAG, el(ID.SIMPLE_TAG, cat([el(ID.TAG_NAME, enc.encode(name)), valueEl]))));
   }
   return el(ID.TAGS, cat(tags));
+}
+
+/** Byte offset of the Segment payload (works on a truncated file prefix). */
+export function segmentPayloadStart(bytes) {
+  let pos = 0;
+  while (pos < bytes.length) {
+    let id, size, sizeLen;
+    [id, pos] = readVint(bytes, pos, true);
+    [size, pos, sizeLen] = readVint(bytes, pos, false);
+    if (id === ID.SEGMENT) return pos;
+    pos += size;
+  }
+  throw new Error('no Segment element');
+}
+
+/** {elementId: absolute offset} from the SeekHead at the Segment start (SPEC §9.1), or null. */
+export function readSeekHead(bytes) {
+  const payloadStart = segmentPayloadStart(bytes);
+  let pos = payloadStart;
+  let id, size, sizeLen;
+  [id, pos] = readVint(bytes, pos, true);
+  [size, pos, sizeLen] = readVint(bytes, pos, false);
+  if (id !== ID.SEEK_HEAD) return null;
+  const out = {};
+  for (const [sid, ss, se] of ebmlChildren(bytes, pos, pos + size)) {
+    if (sid !== ID.SEEK) continue;
+    let target = null, position = null;
+    for (const [fid, fs, fe] of ebmlChildren(bytes, ss, se)) {
+      let v = 0;
+      for (let i = fs; i < fe; i++) v = v * 256 + bytes[i];
+      if (fid === ID.SEEK_ID) target = v;
+      if (fid === ID.SEEK_POSITION) position = v;
+    }
+    if (target !== null && position !== null) out[target] = payloadStart + position;
+  }
+  return out;
+}
+
+/** All SimpleTags among top-level elements in [start, end) — for header-region prefixes. */
+export function collectTagsInRange(bytes, start, end) {
+  const out = {};
+  for (const [eid, ps, pe] of ebmlChildren(bytes, start, end)) {
+    if (eid === ID.TAGS) collectTags(bytes, ps, pe, out);
+  }
+  return out;
 }
 
 /** All SimpleTags in a buffered file: strings last-win, binaries concatenate (SPEC §10). */

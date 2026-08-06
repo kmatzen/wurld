@@ -94,7 +94,28 @@ file playing in a plain `<video>` element.
 - Viewer verified in Chrome (native WebCodecs decode, no WASM), including binary
   frame tables.
 
-## v0.4 (current): range-request access + Polycam
+## v0.5 (current): Record3D, MCAP/Foxglove, ranged viewer, nerfstudio
+
+- **Record3D importer** (`wurld convert capture.r3d out.wl.webm`): the .r3d zip
+  layout confirmed against the app author's own snippets and four community
+  parsers — column-major K, scalar-last ARKit quaternions, LZFSE float32-meters
+  depth (NaN invalid, float16 export variant handled), 0/1/2 confidence. Needs
+  `pip install wurld-video[record3d]`.
+- **MCAP export** (`wurld extract scene.wl.webm out.mcap --format mcap`):
+  Foxglove-ready jsonschema channels (`/camera/pose`, `/camera/image` jpeg,
+  `/camera/depth` 16UC1 bit-exact codes, `/camera/calibration`, `/imu/<id>`) plus
+  the full WURLD document as an MCAP metadata record. Needs `[mcap]` extra.
+- **Progressive ranged viewer**: `viewer/index.html?src=...` now loads via Range
+  requests — trajectory and all poses render from the ~18KB header before any
+  video byte, then video streams through the network decoder. Falls back to full
+  download when the server lacks ranges. `scripts/range_server.py` is a
+  range-capable dev server (python's builtin lacks Range).
+- **nerfstudio DataParser** (`wurld.integrations.nerfstudio_parser`): reads a
+  .wl.webm directly (frames extracted to a `<file>.cache/` beside it), poses
+  converted to nerfstudio's convention, metric depth via
+  `depth_unit_scale_factor` — verified against a live nerfstudio 1.1.5 install.
+
+## v0.4: range-request access + Polycam
 
 - **SeekHead** (SPEC §9.1): batch files begin with a fixed-width SeekHead covering
   the header elements, the first Cluster, and Cues. Combined with the
@@ -160,8 +181,9 @@ file playing in a plain `<video>` element.
   RUB→RDF pose conversion, honest RGB/depth resolution policy). *Validated against
   synthetic fixtures — a real capture to confirm conventions is welcome.*
 
-## Roadmap (v0.5+)
+## Roadmap (v0.6+)
 
-Record3D importer (awaiting a real .r3d sample to validate against); ARKit
-straight-from-device recorder; LeRobot / nerfstudio / Foxglove integrations; ffmpeg
-demuxer patch; browser viewer streaming from `wurld.remote`-style ranged reads.
+Real-device validation of the Stray/Polycam/Record3D importers (synthetic fixtures
+only so far — one capture from each app confirms the conventions); ARKit
+straight-from-device recorder; LeRobot depth-backend PR upstream; ffmpeg demuxer
+patch; viewer Cues-based random video access over ranges.

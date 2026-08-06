@@ -44,6 +44,10 @@ def _cmd_convert(args) -> int:
         from .converters import polycam
 
         polycam.from_polycam(src, args.out, at=args.at, rgb_kbps=args.rgb_kbps)
+    elif kind == "record3d":
+        from .converters import record3d
+
+        record3d.from_record3d(src, args.out, at=args.at, rgb_kbps=args.rgb_kbps)
     else:
         print(f"error: unknown source format {kind!r}", file=sys.stderr)
         return 2
@@ -64,6 +68,10 @@ def _cmd_extract(args) -> int:
         from .converters import colmap
 
         colmap.to_colmap(args.file, args.out)
+    elif args.format == "mcap":
+        from .converters import mcap_export
+
+        mcap_export.to_mcap(args.file, args.out)
     print(f"extracted {args.file} -> {args.out} ({args.format})")
     return 0
 
@@ -110,7 +118,7 @@ def main(argv=None) -> int:
     p_conv = sub.add_parser("convert", help="convert a dataset (TUM / transforms.json / COLMAP) to wurld")
     p_conv.add_argument("source")
     p_conv.add_argument("out")
-    p_conv.add_argument("--from", choices=["tum", "nerfstudio", "colmap", "stray", "polycam"], default=None, help="override auto-detection")
+    p_conv.add_argument("--from", choices=["tum", "nerfstudio", "colmap", "stray", "polycam", "record3d"], default=None, help="override auto-detection")
     p_conv.add_argument("--images", default=None, help="COLMAP images directory (default: <source>/images)")
     p_conv.add_argument("--at", choices=["depth", "rgb"], default="depth", help="Stray/Polycam: resample RGB to the depth grid (default) or depth to the RGB grid")
     p_conv.add_argument("--fps", type=float, default=30.0, help="synthesized fps for timestamp-less sources")
@@ -120,7 +128,7 @@ def main(argv=None) -> int:
     p_ext = sub.add_parser("extract", help="extract a wurld file back to a dataset layout")
     p_ext.add_argument("file")
     p_ext.add_argument("out")
-    p_ext.add_argument("--format", choices=["tum", "transforms", "colmap"], required=True)
+    p_ext.add_argument("--format", choices=["tum", "transforms", "colmap", "mcap"], required=True)
     p_ext.set_defaults(func=_cmd_extract)
 
     p_demo = sub.add_parser("demo", help="write a synthetic demo sequence")
