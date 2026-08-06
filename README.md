@@ -113,6 +113,22 @@ file playing in a plain `<video>` element.
 - **Python `wurld.stream.StreamReader`**: incremental parser for live/growing
   streams; batch `wl.read()` also accepts crash-truncated live files via chunk
   concatenation.
+- **Python live recording — `wurld.StreamWriter`** (needs chromapakz with
+  streaming encode, [ChromaPakZ #43](https://github.com/kmatzen/ChromaPakZ/pull/43);
+  `pip install "chromapakz @ git+https://github.com/kmatzen/chromapakz@main"` until
+  the next PyPI release):
+
+  ```python
+  w = wl.StreamWriter(out.write, cameras={"0": cam}, has_rgb=True,
+                      signal_meta=[wl.SignalMeta("depth", "depth",
+                          {"type": "inverse_depth", "near": 0.4, "far": 12.0})])
+  w.add_frame(frame, rgb=rgba, signals={"depth": {"float": z}})   # per capture tick
+  w.add_imu("imu0", samples)                                      # any cadence
+  w.finish()
+  ```
+
+  Verified: bit-exact depth through the live path, IMU chunk concatenation,
+  progressive parse parity, crash-truncation survival, and ffmpeg-clean output.
 
 ## v0.2
 
@@ -127,8 +143,7 @@ file playing in a plain `<video>` element.
 
 ## Roadmap (v0.4+)
 
-SeekHead for efficient range-request access (COPC-style static hosting); Python live
-recording (needs a streaming encode API in chromapakz Python); Record3D importer
-(awaiting a real .r3d sample to validate against), Polycam raw, ARKit
+SeekHead for efficient range-request access (COPC-style static hosting); Record3D
+importer (awaiting a real .r3d sample to validate against), Polycam raw, ARKit
 straight-from-device; LeRobot / nerfstudio / Foxglove integrations; ffmpeg demuxer
 patch.

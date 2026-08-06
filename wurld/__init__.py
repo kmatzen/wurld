@@ -15,9 +15,10 @@ from .container import (
     read,
     write,
 )
+from .stream import StreamReader, StreamWriter
 from . import conventions
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "Camera",
@@ -30,4 +31,6 @@ __all__ = [
     "write",
     "info",
     "conventions",
+    "StreamReader",
+    "StreamWriter",
 ]
