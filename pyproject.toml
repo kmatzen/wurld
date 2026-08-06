@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wurld-video"
-version = "0.3.0"
+version = "0.4.0"
 description = "Posed sensor video: RGB + per-frame camera pose + intrinsics + bit-exact depth in one playable WebM"
 readme = "README.md"
 requires-python = ">=3.10"

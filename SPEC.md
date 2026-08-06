@@ -1,4 +1,4 @@
-# Wurld — posed sensor video, v0.3 (working title)
+# Wurld — posed sensor video, v0.4 (working title)
 
 Wurld is a container profile for **posed sensor video**: RGB video + per-frame
 camera pose + intrinsics + timestamps + bit-exact auxiliary signals (metric depth,
@@ -273,8 +273,27 @@ Tags(WURLD_FRAMES [, WURLD_IMU_*]), Cues         <- finalize (absent if crashed)
   The chunked form exists for live recording, where poses are not known at header
   time.
 - Cues, when written, MUST reflect final Cluster offsets (writers that insert chunk
-  tags between Clusters rebuild Cues). A `SeekHead` for range-request access is
-  reserved for a future revision.
+  tags between Clusters rebuild Cues).
+
+### 9.1 SeekHead and range-request access (v0.4)
+
+Batch writers SHOULD begin the Segment with a Matroska `SeekHead` (ID `0x114D9B74`)
+whose entries cover: `Info`, `Tracks`, every `Tags` element in the header region, the
+**first `Cluster`**, and `Cues`. `SeekPosition` values are byte offsets relative to
+the Segment payload start (which includes the SeekHead itself) and SHOULD be encoded
+as fixed-width 8-byte unsigned integers so the SeekHead's own size is independent of
+the values it carries.
+
+With the metadata-first layout (§9) plus a SeekHead, a range-request client needs:
+
+1. one small read of the file head (EBML/Segment headers + SeekHead);
+2. one read of the header region, whose extent is exactly `[0, first-Cluster
+   position)` — yielding **all calibration and every pose without touching video
+   bytes**;
+3. optional reads of `Cues` and individual Clusters for random video access.
+
+Live recordings omit the SeekHead (final positions are unknowable at header time);
+a remuxing finalizer MAY add one.
 
 ## 10. Compatibility & versioning
 

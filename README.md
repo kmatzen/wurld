@@ -94,7 +94,24 @@ file playing in a plain `<video>` element.
 - Viewer verified in Chrome (native WebCodecs decode, no WASM), including binary
   frame tables.
 
-## v0.3 (current): fully streamable playback and recording
+## v0.4 (current): range-request access + Polycam
+
+- **SeekHead** (SPEC §9.1): batch files begin with a fixed-width SeekHead covering
+  the header elements, the first Cluster, and Cues. Combined with the
+  metadata-first layout, a static file on S3/CDN serves calibration and every pose
+  in at most two ranged reads.
+- **`wurld.remote`**: `fetch_header(http_fetcher(url))` pulls all metadata +
+  poses without downloading video — verified <2% of file bytes on a 60-frame
+  sequence; `cues_offset`/`header_extent` expose what a video-seeking client needs
+  next.
+- **Polycam raw importer**: keyframes/cameras JSON (`fx/fy/cx/cy`, `t_00..t_23`
+  ARKit c2w), microsecond-timestamp stems (sorted numerically), 16-bit mm depth,
+  0/127/255 confidence labels, `corrected_cameras`/`corrected_images` preferred
+  with `corrected=False` opt-out, same `--at depth|rgb` resolution policy as
+  Stray. *Like Stray: validated against synthetic fixtures built from polyform's
+  published schema — a real capture to confirm conventions is welcome.*
+
+## v0.3: fully streamable playback and recording
 
 - **Streaming layout** (SPEC §9): all wurld metadata — calibration *and* every
   pose — now lands **before the first Cluster**; Cues are rebuilt for the new
@@ -143,9 +160,8 @@ file playing in a plain `<video>` element.
   RUB→RDF pose conversion, honest RGB/depth resolution policy). *Validated against
   synthetic fixtures — a real capture to confirm conventions is welcome.*
 
-## Roadmap (v0.4+)
+## Roadmap (v0.5+)
 
-SeekHead for efficient range-request access (COPC-style static hosting); Record3D
-importer (awaiting a real .r3d sample to validate against), Polycam raw, ARKit
-straight-from-device; LeRobot / nerfstudio / Foxglove integrations; ffmpeg demuxer
-patch.
+Record3D importer (awaiting a real .r3d sample to validate against); ARKit
+straight-from-device recorder; LeRobot / nerfstudio / Foxglove integrations; ffmpeg
+demuxer patch; browser viewer streaming from `wurld.remote`-style ranged reads.

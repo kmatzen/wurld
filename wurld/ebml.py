@@ -24,6 +24,12 @@ CUE_TIME = 0xB3
 CUE_TRACK_POSITIONS = 0xB7
 CUE_TRACK = 0xF7
 CUE_CLUSTER_POSITION = 0xF1
+SEEK_HEAD = 0x114D9B74
+SEEK = 0x4DBB
+SEEK_ID = 0x53AB
+SEEK_POSITION = 0x53AC
+INFO = 0x1549A966
+TRACKS = 0x1654AE6B
 
 
 def _read_vint(data: bytes, pos: int, keep_marker: bool) -> tuple[int, int]:
@@ -162,24 +168,67 @@ def _build_cues(clusters: list[tuple[int, int]], track: int = 1) -> bytes:
     return _element(CUES, body)
 
 
+def _build_seek_head(entries: list[tuple[int, int]]) -> bytes:
+    """entries: (element_id, position relative to Segment payload start).
+
+    Positions are fixed 8-byte uints so the SeekHead's size does not depend on
+    the values, letting callers compute positions in a single pass (SPEC §9.1).
+    """
+    body = b""
+    for element_id, pos in entries:
+        body += _element(
+            SEEK,
+            _element(SEEK_ID, _encode_id(element_id))
+            + _element(SEEK_POSITION, pos.to_bytes(8, "big")),
+        )
+    return _element(SEEK_HEAD, body)
+
+
+def seek_head_size(n_entries: int) -> int:
+    """Byte length of a SeekHead built by _build_seek_head (value-independent)."""
+    return len(_build_seek_head([(SEGMENT, 0)] * n_entries))
+
+
+def read_seek_head(data: bytes, payload_start: int, payload_end: int) -> dict[int, int]:
+    """{element_id: absolute file offset} from the first SeekHead child, or {}."""
+    for eid, _, pstart, pend in _top_level(data, payload_start, payload_end):
+        if eid != SEEK_HEAD:
+            continue
+        out = {}
+        for sid, ss, se in iter_children(data, pstart, pend):
+            if sid != SEEK:
+                continue
+            target = pos = None
+            for fid, fs, fe in iter_children(data, ss, se):
+                if fid == SEEK_ID:
+                    target = _read_uint(data, fs, fe)
+                elif fid == SEEK_POSITION:
+                    pos = _read_uint(data, fs, fe)
+            if target is not None and pos is not None:
+                out[target] = payload_start + pos
+        return out
+    return {}
+
+
 def insert_header_tags(webm: bytes, tags: dict[str, str | bytes]) -> bytes:
-    """Insert a Tags element before the first Cluster (streaming layout, SPEC §9).
+    """Rebuild into the batch streaming layout (SPEC §9/§9.1): a SeekHead, then the
+    original header elements, the wurld Tags, Clusters, and rebuilt Cues.
 
     Cluster offsets shift, so Cues are rebuilt from the actual cluster
-    timestamps at their new positions; a pre-existing Cues element is replaced.
+    timestamps at their new positions; a pre-existing Cues/SeekHead is replaced.
     """
     seg_start, payload_start, payload_end = _segment_bounds(webm)
     tags_bytes = build_tags(tags)
 
-    head_parts: list[bytes] = []  # everything before the first Cluster, minus old Cues
-    body_parts: list[bytes] = []  # Clusters and anything between/after them, minus old Cues
+    head_parts: list[tuple[int, bytes]] = []  # (element id, raw) before the first Cluster
+    body_parts: list[bytes] = []  # Clusters and anything between/after them
     seen_cluster = False
-    cluster_offsets: list[tuple[int, int]] = []  # (timestamp, offset within body_parts)
+    cluster_offsets: list[tuple[int, int]] = []  # (timestamp, offset within body)
     body_len = 0
     for eid, elem_start, pstart, pend in _top_level(webm, payload_start, payload_end):
         raw = webm[elem_start:pend]
-        if eid == CUES:
-            continue  # rebuilt below
+        if eid in (CUES, SEEK_HEAD):
+            continue  # rebuilt / replaced below
         if eid == CLUSTER:
             seen_cluster = True
             ts = 0
@@ -191,14 +240,35 @@ def insert_header_tags(webm: bytes, tags: dict[str, str | bytes]) -> bytes:
             body_parts.append(raw)
             body_len += len(raw)
         elif not seen_cluster:
-            head_parts.append(raw)
+            head_parts.append((eid, raw))
         else:
             body_parts.append(raw)
             body_len += len(raw)
 
-    head = b"".join(head_parts) + tags_bytes
-    cues = _build_cues([(ts, len(head) + off) for ts, off in cluster_offsets])
-    new_payload = head + b"".join(body_parts) + cues
+    # SeekHead entries: every header element, the first Cluster, and Cues.
+    n_entries = len(head_parts) + 1 + (2 if cluster_offsets else 1)
+    sh_size = seek_head_size(n_entries)
+
+    entries: list[tuple[int, int]] = []
+    pos = sh_size
+    head = b""
+    for eid, raw in head_parts:
+        entries.append((eid, pos))
+        head += raw
+        pos += len(raw)
+    entries.append((TAGS, pos))
+    head += tags_bytes
+    pos += len(tags_bytes)
+    first_cluster_pos = pos
+    if cluster_offsets:
+        entries.append((CLUSTER, first_cluster_pos))
+    cues_pos = first_cluster_pos + body_len
+    entries.append((CUES, cues_pos))
+
+    seek_head = _build_seek_head(entries)
+    assert len(seek_head) == sh_size, "SeekHead size must be value-independent"
+    cues = _build_cues([(ts, first_cluster_pos + off) for ts, off in cluster_offsets])
+    new_payload = seek_head + head + b"".join(body_parts) + cues
     return (
         webm[:seg_start]
         + _encode_id(SEGMENT)
@@ -208,6 +278,26 @@ def insert_header_tags(webm: bytes, tags: dict[str, str | bytes]) -> bytes:
     )
 
 
+def collect_simple_tags(data: bytes, start: int, end: int):
+    """Yield (name, str|bytes) for each SimpleTag inside one Tags payload."""
+    for tid, tstart, tend in iter_children(data, start, end):
+        if tid != TAG:
+            continue
+        for sid, sstart, send in iter_children(data, tstart, tend):
+            if sid != SIMPLE_TAG:
+                continue
+            tag_name, value = None, None
+            for fid, fstart, fend in iter_children(data, sstart, send):
+                if fid == TAG_NAME:
+                    tag_name = data[fstart:fend].decode()
+                elif fid == TAG_STRING:
+                    value = data[fstart:fend].decode()
+                elif fid == TAG_BINARY:
+                    value = bytes(data[fstart:fend])
+            if tag_name is not None and value is not None:
+                yield tag_name, value
+
+
 def read_all_tags(webm: bytes) -> dict[str, str | bytes]:
     """All SimpleTags in the file: TagString entries as str, TagBinary as bytes."""
     _, payload_start, payload_end = _segment_bounds(webm)
@@ -215,25 +305,11 @@ def read_all_tags(webm: bytes) -> dict[str, str | bytes]:
     for eid, start, end in iter_children(webm, payload_start, payload_end):
         if eid != TAGS:
             continue
-        for tid, tstart, tend in iter_children(webm, start, end):
-            if tid != TAG:
-                continue
-            for sid, sstart, send in iter_children(webm, tstart, tend):
-                if sid != SIMPLE_TAG:
-                    continue
-                tag_name, value = None, None
-                for fid, fstart, fend in iter_children(webm, sstart, send):
-                    if fid == TAG_NAME:
-                        tag_name = webm[fstart:fend].decode()
-                    elif fid == TAG_STRING:
-                        value = webm[fstart:fend].decode()
-                    elif fid == TAG_BINARY:
-                        value = bytes(webm[fstart:fend])
-                if tag_name is not None and value is not None:
-                    if isinstance(value, bytes) and isinstance(out.get(tag_name), bytes):
-                        out[tag_name] += value  # repeated binary tags concatenate (SPEC §10)
-                    else:
-                        out[tag_name] = value  # strings: last occurrence wins
+        for tag_name, value in collect_simple_tags(webm, start, end):
+            if isinstance(value, bytes) and isinstance(out.get(tag_name), bytes):
+                out[tag_name] += value  # repeated binary tags concatenate (SPEC §10)
+            else:
+                out[tag_name] = value  # strings: last occurrence wins
     return out
 
 

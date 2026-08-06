@@ -17,7 +17,7 @@ import numpy as np
 
 from . import conventions, ebml
 
-FORMAT_VERSION = "0.3"
+FORMAT_VERSION = "0.4"
 
 # Binary frame table (SPEC §7): u32 i, u32 camera idx, f64 t, 4×f32 q, 3×f32 tr, u8 flags
 _FRAME_RECORD = struct.Struct("<IId4f3fB")

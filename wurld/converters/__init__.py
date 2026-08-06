@@ -4,6 +4,7 @@ Auto-detection (``detect(path)``):
 - directory with ``rgb.txt`` + ``groundtruth.txt``            -> TUM RGB-D
 - ``transforms.json`` file (or directory containing one)      -> nerfstudio/instant-ngp
 - directory with ``odometry.csv`` + ``camera_matrix.csv``     -> Stray Scanner
+- directory with ``keyframes/cameras`` (or ``corrected_cameras``) -> Polycam raw
 - directory with ``cameras.bin|txt`` + ``images.bin|txt``
   (directly, or under ``sparse/0``)                           -> COLMAP model
 """
@@ -24,6 +25,8 @@ def detect(path: str | Path) -> str | None:
             return "nerfstudio"
         if (p / "odometry.csv").exists() and (p / "camera_matrix.csv").exists():
             return "stray"
+        if (p / "keyframes" / "cameras").is_dir() or (p / "keyframes" / "corrected_cameras").is_dir():
+            return "polycam"
         for base in (p, p / "sparse" / "0", p / "sparse"):
             if any((base / f"cameras.{ext}").exists() for ext in ("bin", "txt")):
                 return "colmap"
