@@ -281,6 +281,23 @@ class Sequence:
                 return s
         return None
 
+    def fetch_frames(self, indices: list[int]) -> dict[int, dict]:
+        """Decode only the Clusters containing ``indices`` (partial decode).
+
+        For long sequences this skips decoding untouched clusters entirely —
+        the local counterpart of :func:`wurld.remote.fetch_frames`, and it
+        needs the same cluster-independence (chromapakz signal-keyframe
+        cadence). Returns ``{index: {"rgb": ..., "signals": {id: ...}}}``.
+        """
+        from . import remote
+
+        data = self._bytes
+
+        def fetch(offset: int, size: int) -> bytes:
+            return data[offset : offset + size]
+
+        return remote.fetch_frames(fetch, indices)["frames"]
+
     def depth_meters(self, frame_index: int | None = None) -> np.ndarray:
         """Metric depth (meters, NaN=invalid) for one frame or all frames."""
         meta = self.signal_meta("depth")

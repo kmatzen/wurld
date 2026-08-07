@@ -6,6 +6,7 @@ wurld capture drops straight into Foxglove Studio / lichtblick:
     /camera/image        foxglove.CompressedImage   (jpeg)
     /camera/depth        foxglove.RawImage          (16UC1 raw codes)
     /camera/pose         foxglove.PoseInFrame       (world frame, canonical RDF camera)
+    /tf                  foxglove.FrameTransform    (world -> camera/<id> per frame)
     /camera/calibration  foxglove.CameraCalibration (per camera, once at start)
     /imu/<id>            wurld.ImuSample        (custom schema)
 
@@ -64,6 +65,12 @@ SCHEMAS = {
         "type": "object",
         "properties": {"timestamp": _TS, "gyro": _VEC3, "accel": _VEC3},
     },
+    "foxglove.FrameTransform": {
+        "type": "object",
+        "properties": {"timestamp": _TS, "parent_frame_id": {"type": "string"},
+                       "child_frame_id": {"type": "string"},
+                       "translation": _VEC3, "rotation": _QUAT},
+    },
 }
 
 
@@ -117,6 +124,7 @@ def to_mcap(wl_path: str | Path, out_path: str | Path, jpeg_quality: int = 90) -
         ch_image = channel("/camera/image", "foxglove.CompressedImage") if rgb is not None else None
         ch_depth = channel("/camera/depth", "foxglove.RawImage") if depth_raw is not None else None
         ch_pose = channel("/camera/pose", "foxglove.PoseInFrame")
+        ch_tf = channel("/tf", "foxglove.FrameTransform")
         ch_calib = channel("/camera/calibration", "foxglove.CameraCalibration")
 
         t0 = seq.frames[0].t if seq.frames else 0.0
@@ -131,6 +139,15 @@ def to_mcap(wl_path: str | Path, out_path: str | Path, jpeg_quality: int = 90) -
                     "timestamp": _stamp(fr.t), "frame_id": "world",
                     "pose": {"position": dict(zip("xyz", map(float, fr.tr))),
                              "orientation": dict(zip("xyzw", map(float, q)))},
+                }, ns)
+                # world -> camera transform tree entry: lets Foxglove's 3D panel
+                # place images/depth at the camera as it moves.
+                _publish(w, ch_tf, fr.t, {
+                    "timestamp": _stamp(fr.t),
+                    "parent_frame_id": "world",
+                    "child_frame_id": f"camera/{fr.camera}",
+                    "translation": dict(zip("xyz", map(float, fr.tr))),
+                    "rotation": dict(zip("xyzw", map(float, q))),
                 }, ns)
             if ch_image is not None:
                 buf = io.BytesIO()

@@ -5,6 +5,7 @@ Auto-detection (``detect(path)``):
 - ``transforms.json`` file (or directory containing one)      -> nerfstudio/instant-ngp
 - ``*.r3d`` file                                              -> Record3D
 - directory with ``odometry.csv`` + ``camera_matrix.csv``     -> Stray Scanner
+- directory with ``[mav0/]cam0/sensor.yaml``                  -> EuRoC MAV
 - directory with ``keyframes/cameras`` (or ``corrected_cameras``) -> Polycam raw
 - directory with ``cameras.bin|txt`` + ``images.bin|txt``
   (directly, or under ``sparse/0``)                           -> COLMAP model
@@ -30,6 +31,8 @@ def detect(path: str | Path) -> str | None:
             return "stray"
         if (p / "keyframes" / "cameras").is_dir() or (p / "keyframes" / "corrected_cameras").is_dir():
             return "polycam"
+        if (p / "cam0" / "sensor.yaml").exists() or (p / "mav0" / "cam0" / "sensor.yaml").exists():
+            return "euroc"
         for base in (p, p / "sparse" / "0", p / "sparse"):
             if any((base / f"cameras.{ext}").exists() for ext in ("bin", "txt")):
                 return "colmap"

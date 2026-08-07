@@ -155,3 +155,24 @@ def test_fetch_frames_rejects_pre_cadence_files(tmp_path):
     p.write_bytes(bytes(data))
     with pytest.raises(ValueError, match="keyframe"):
         remote.fetch_frames(remote.file_fetcher(p), [35])  # a cluster-1 frame
+
+
+def test_sequence_fetch_frames_local_partial_decode(tmp_path):
+    import chromapakz as cz
+    from wurld.synthetic import make_sequence
+
+    rgb, depth_m, cameras, frames = make_sequence(n_frames=90, width=96, height=72, fps=30)
+    d16 = cz.quantize_inverse(np.where(depth_m > 0, np.clip(depth_m, 0.5, 40.0), np.nan),
+                              near=0.5, far=40.0)
+    rgba = np.concatenate([rgb, np.full(rgb.shape[:3] + (1,), 255, np.uint8)], -1)
+    p = tmp_path / "seq.wl.webm"
+    wl.write(p, cameras=cameras, frames=frames, rgb=rgba,
+             signals={"depth": d16}, specs={"depth": cz.inverse_depth_spec(0.5, 40.0)})
+
+    seq = wl.read(p)
+    got = seq.fetch_frames([3, 70])
+    assert set(got) == {3, 70}
+    full = seq.signal("depth")
+    assert np.array_equal(got[3]["signals"]["depth"], full[3])
+    assert np.array_equal(got[70]["signals"]["depth"], full[70])
+    assert np.array_equal(got[70]["rgb"], np.asarray(seq.rgb[70]))

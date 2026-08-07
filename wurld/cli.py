@@ -48,6 +48,10 @@ def _cmd_convert(args) -> int:
         from .converters import record3d
 
         record3d.from_record3d(src, args.out, at=args.at, rgb_kbps=args.rgb_kbps)
+    elif kind == "euroc":
+        from .converters import euroc
+
+        euroc.from_euroc(src, args.out, rgb_kbps=args.rgb_kbps)
     else:
         print(f"error: unknown source format {kind!r}", file=sys.stderr)
         return 2
@@ -118,7 +122,7 @@ def main(argv=None) -> int:
     p_conv = sub.add_parser("convert", help="convert a dataset (TUM / transforms.json / COLMAP) to wurld")
     p_conv.add_argument("source")
     p_conv.add_argument("out")
-    p_conv.add_argument("--from", choices=["tum", "nerfstudio", "colmap", "stray", "polycam", "record3d"], default=None, help="override auto-detection")
+    p_conv.add_argument("--from", choices=["tum", "nerfstudio", "colmap", "stray", "polycam", "record3d", "euroc"], default=None, help="override auto-detection")
     p_conv.add_argument("--images", default=None, help="COLMAP images directory (default: <source>/images)")
     p_conv.add_argument("--at", choices=["depth", "rgb"], default="depth", help="Stray/Polycam: resample RGB to the depth grid (default) or depth to the RGB grid")
     p_conv.add_argument("--fps", type=float, default=30.0, help="synthesized fps for timestamp-less sources")

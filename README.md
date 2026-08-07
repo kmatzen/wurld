@@ -94,7 +94,25 @@ file playing in a plain `<video>` element.
 - Viewer verified in Chrome (native WebCodecs decode, no WASM), including binary
   frame tables.
 
-## v0.7 (current): random video access over ranges
+## v0.8 (current): partial decode, EuRoC stereo+IMU, release plumbing
+
+- **`Sequence.fetch_frames(indices)`**: local partial decode — reading 3 frames
+  of a 10k-frame file no longer decodes the other clusters (same cluster-splice
+  machinery as remote access, bit-exact parity tested).
+- **EuRoC MAV importer** (`wurld convert MH_01_easy out.wl.webm`): the first
+  real exercise of rigs + IMU together — cam0 posed video via
+  `T_WB @ T_BS`, both cameras' OPENCV calibration plus a `body` rig
+  (camera-to-body extrinsics; `rig_c2w` derives cam1 poses), imu0 with
+  imu-to-cam0 extrinsics and measured rate. Dependency-free mini-YAML parser
+  for `sensor.yaml`. (Video carries cam0 only — one RGB track in SPEC v0.1.)
+- **MCAP `/tf`**: FrameTransform world→camera per posed frame, so Foxglove's 3D
+  panel places the moving camera correctly.
+- **ChromaPakZ #45 merged** (signal keyframe cadence) and release PR
+  [#46 (0.4.0)](https://github.com/kmatzen/ChromaPakZ/pull/46) staged — once
+  published, wurld pins `chromapakz>=0.4.0` instead of git installs. iOS
+  vendor libs rebuilt from merged main.
+
+## v0.7: random video access over ranges
 
 - **Cluster-independent decode** (enabled by
   [ChromaPakZ #45](https://github.com/kmatzen/ChromaPakZ/pull/45), pending merge):
@@ -220,9 +238,10 @@ file playing in a plain `<video>` element.
   RUB→RDF pose conversion, honest RGB/depth resolution policy). *Validated against
   synthetic fixtures — a real capture to confirm conventions is welcome.*
 
-## Roadmap (v0.8+)
+## Roadmap (v0.9+)
 
 Real-device validation: one WurldCam capture (either format) plus one
 Stray/Polycam/Record3D capture confirms every convention end to end; LeRobot
-depth-backend PR upstream (staged privately); merge ChromaPakZ #45 and cut a
-chromapakz PyPI release so wurld can pin released versions again.
+depth-backend PR upstream (staged privately); merge ChromaPakZ #46 + publish the
+0.4.0 release, then pin `chromapakz>=0.4.0` here; SPEC v0.2 multi-track RGB
+(true stereo pixel storage) as the next format increment.

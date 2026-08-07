@@ -40,6 +40,7 @@ def test_mcap_channels_and_counts(mcap_file, scene):
         topics = {c.topic: summary.statistics.channel_message_counts[cid]
                   for cid, c in summary.channels.items()}
     assert topics["/camera/pose"] == 10
+    assert topics["/tf"] == 10
     assert topics["/camera/image"] == 10
     assert topics["/camera/depth"] == 10
     assert topics["/camera/calibration"] == 1
