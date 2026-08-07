@@ -20,101 +20,55 @@ import Foundation
 final class PixelConverter {
     enum ConvertError: Error {
         case unsupportedFormat(OSType)
-        case cvFormat
-        case converter(vImage_Error)
         case convert(vImage_Error)
         case scale(vImage_Error)
-        case scratch(vImage_Error)
     }
 
     private let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
-    private var converter: vImageConverter?
-    /// Colour-managed RGBA at the source resolution, reused across frames. Only
-    /// ever touched on the caller's serial write queue, one frame at a time.
-    private var srgbFull = vImage_Buffer()
-    private var srgbW = 0, srgbH = 0
-
-    deinit {
-        if srgbFull.data != nil { free(srgbFull.data) }
-    }
 
     /// Camera YpCbCr -> colour-managed sRGB RGBA, downscaled to `width`x`height`.
     /// Throws on any failure so the caller surfaces it rather than silently
     /// writing wrong colour.
+    ///
+    /// `vImageBuffer_InitWithCVPixelBuffer` does the whole colour-managed
+    /// conversion in one call — reading the buffer's matrix/primaries/transfer/
+    /// range/siting tags, applying the YpCbCr matrix, chroma upsample, gamut map
+    /// and transfer re-encode to sRGB — then a SIMD downscale to the depth grid.
+    /// No filter graph, no synchronous GPU->CPU readback. (It rebuilds an internal
+    /// converter per call; caching one via `vImageConvert_AnyToAny` is a possible
+    /// later optimisation, but the per-call setup is CPU-cheap next to the readback
+    /// this replaces.)
     func sRGBA(from buffer: CVPixelBuffer, width: Int, height: Int) throws -> [UInt8] {
         let fmt = CVPixelBufferGetPixelFormatType(buffer)
         guard fmt == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
                 || fmt == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         else { throw ConvertError.unsupportedFormat(fmt) }
 
-        if converter == nil { try buildConverter(for: buffer) }
-
-        CVPixelBufferLockBaseAddress(buffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-
-        let srcW = CVPixelBufferGetWidthOfPlane(buffer, 0)
-        let srcH = CVPixelBufferGetHeightOfPlane(buffer, 0)
-        try ensureScratch(width: srcW, height: srcH)
-
-        // AnyToAny takes the source as one vImage_Buffer per plane (Y, then CbCr).
-        var srcs = [
-            vImage_Buffer(data: CVPixelBufferGetBaseAddressOfPlane(buffer, 0),
-                          height: vImagePixelCount(srcH), width: vImagePixelCount(srcW),
-                          rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)),
-            vImage_Buffer(data: CVPixelBufferGetBaseAddressOfPlane(buffer, 1),
-                          height: vImagePixelCount(CVPixelBufferGetHeightOfPlane(buffer, 1)),
-                          width: vImagePixelCount(CVPixelBufferGetWidthOfPlane(buffer, 1)),
-                          rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 1)),
-        ]
-        let diag = "DIAG AnyToAny src0=\(srcW)x\(srcH) "
-            + "src1=\(CVPixelBufferGetWidthOfPlane(buffer, 1))x\(CVPixelBufferGetHeightOfPlane(buffer, 1)) "
-            + "dst=\(srgbW)x\(srgbH) "
-            + "nsrc=\(vImageConverter_GetNumberOfSourceBuffers(converter!)) "
-            + "ndst=\(vImageConverter_GetNumberOfDestinationBuffers(converter!))\n"
-        FileHandle.standardError.write(Data(diag.utf8))
-        let convRC = srcs.withUnsafeMutableBufferPointer { sp -> vImage_Error in
-            vImageConvert_AnyToAny(converter!, sp.baseAddress!, &srgbFull, nil,
-                                   vImage_Flags(kvImageNoFlags))
-        }
-        guard convRC == kvImageNoError else { throw ConvertError.convert(convRC) }
-
-        var out = [UInt8](repeating: 0, count: width * height * 4)
-        let scaleRC: vImage_Error = out.withUnsafeMutableBytes { dstBytes in
-            var dst = vImage_Buffer(data: dstBytes.baseAddress,
-                                    height: vImagePixelCount(height), width: vImagePixelCount(width),
-                                    rowBytes: width * 4)
-            return vImageScale_ARGB8888(&srgbFull, &dst, nil, vImage_Flags(kvImageNoFlags))
-        }
-        guard scaleRC == kvImageNoError else { throw ConvertError.scale(scaleRC) }
-        return out
-    }
-
-    private func buildConverter(for buffer: CVPixelBuffer) throws {
-        // Both sources are fully colour-tagged — ARKit tags the camera frame, and
+        // Both sources are fully colour-tagged: ARKit tags the camera frame, and
         // `YCbCr420.make` tags the simulator buffer with matrix, colour space and
-        // chroma siting — so the CV format builds straight from the buffer with no
-        // accessor/mutation dance (and no fragile const-handle cast).
+        // chroma siting — so the CV format builds straight from the buffer.
         let cvFmt = vImageCVImageFormat_CreateWithCVPixelBuffer(buffer).takeRetainedValue()
         var cgFmt = vImage_CGImageFormat(
             bitsPerComponent: 8, bitsPerPixel: 32,
             colorSpace: Unmanaged.passRetained(srgb),
             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
             version: 0, decode: nil, renderingIntent: .defaultIntent)
-        var err = kvImageNoError
-        guard let conv = vImageConverter_CreateForCVToCGImageFormat(
-            cvFmt, &cgFmt, nil, vImage_Flags(kvImagePrintDiagnosticsToConsole), &err),
-            err == kvImageNoError
-        else { throw ConvertError.converter(err) }
-        converter = conv.takeRetainedValue()
-    }
 
-    private func ensureScratch(width: Int, height: Int) throws {
-        if srgbFull.data != nil, srgbW == width, srgbH == height { return }
-        if srgbFull.data != nil { free(srgbFull.data); srgbFull.data = nil }
-        let rc = vImageBuffer_Init(&srgbFull, vImagePixelCount(height), vImagePixelCount(width),
-                                   32, vImage_Flags(kvImageNoFlags))
-        guard rc == kvImageNoError else { srgbFull.data = nil; throw ConvertError.scratch(rc) }
-        srgbW = width; srgbH = height
+        var full = vImage_Buffer()
+        let initRC = vImageBuffer_InitWithCVPixelBuffer(
+            &full, &cgFmt, buffer, cvFmt, nil, vImage_Flags(kvImageNoFlags))
+        guard initRC == kvImageNoError else { throw ConvertError.convert(initRC) }
+        defer { free(full.data) }
+
+        var out = [UInt8](repeating: 0, count: width * height * 4)
+        let scaleRC: vImage_Error = out.withUnsafeMutableBytes { dstBytes in
+            var dst = vImage_Buffer(data: dstBytes.baseAddress,
+                                    height: vImagePixelCount(height), width: vImagePixelCount(width),
+                                    rowBytes: width * 4)
+            return vImageScale_ARGB8888(&full, &dst, nil, vImage_Flags(kvImageNoFlags))
+        }
+        guard scaleRC == kvImageNoError else { throw ConvertError.scale(scaleRC) }
+        return out
     }
 }
 
