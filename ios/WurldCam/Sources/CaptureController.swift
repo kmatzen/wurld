@@ -44,6 +44,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var wlWriter: WurldStreamWriter?
     private var wlFile: FileHandle?
     private let wlNear = 0.1, wlFar = 12.0  // ARKit LiDAR effective range, metres
+    private var wlFirstTimestamp: TimeInterval?
     private let writeQueue = DispatchQueue(label: "wurld.capture.write")
     /// Frames handed to writeQueue but not yet encoded. The buffers we pass it
     /// belong to the ARFrame, so holding a backlog starves ARKit's pixel-buffer
@@ -160,7 +161,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             return
         }
         captureURL = url
-        poses = []; timestamps = []; frameCount = 0; lastFrameTime = -1
+        poses = []; timestamps = []; frameCount = 0; lastFrameTime = -1; wlFirstTimestamp = nil
         inFlightLock.lock(); inFlight = 0; droppedFrames = 0; inFlightLock.unlock()
         isRecording = true
         statusText = "recording"
@@ -289,13 +290,27 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             // Creating the encoder emits the mux header through weave immediately.
             wlEncoder = try ChromapakzStreamEncoder(
                 width: dw, height: dh, fps: Int(round(1.0 / frameInterval)),
-                rgbKbps: 2000, near: wlNear, far: wlFar, includeConfidence: true
+                rgbKbps: 2000, near: wlNear, far: wlFar, includeConfidence: true,
+                // Poses also go out as WebVTT cues so a capture that never touches a
+                // desktop is still readable by plain ffmpeg. The binary table written
+                // by WurldStreamWriter stays authoritative.
+                textTrack: "wurld-poses"
             ) { chunk in writer.weave(chunk) }
         }
 
         // Pose first: pending poses flush ahead of the cluster holding this frame.
-        wlWriter?.addPose(canonicalPose(index: UInt32(index), time: timestamp,
-                                        arkitTransform: transform))
+        let pose = canonicalPose(index: UInt32(index), time: timestamp, arkitTransform: transform)
+        wlWriter?.addPose(pose)
+        // Cue times rebase to the media timeline: ARKit timestamps are device uptime,
+        // so an absolute cue would land far past the end of the video. The true value
+        // stays in the payload.
+        if wlFirstTimestamp == nil { wlFirstTimestamp = timestamp }
+        let q = pose.qWXYZ, tr = pose.translation
+        try? wlEncoder?.addText(
+            "i=\(index) t=\(timestamp) camera=0 "
+            + "q_wxyz=\(q.x),\(q.y),\(q.z),\(q.w) tr=\(tr.x),\(tr.y),\(tr.z)",
+            timestamp: max(0, timestamp - (wlFirstTimestamp ?? timestamp)),
+            duration: frameInterval)
 
         let rgba = rgbaPlane(image, width: dw, height: dh)
         let z = floatPlane(depth)

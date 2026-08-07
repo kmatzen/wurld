@@ -7,17 +7,23 @@ import Foundation
 /// pose tags between them without parsing byte boundaries. `emit_cues` is
 /// off: injected tag bytes would invalidate cue offsets (wurld SPEC §9).
 final class ChromapakzStreamEncoder {
-    enum EncoderError: Error { case create(Int32), addFrame(Int32), finish(Int32) }
+    enum EncoderError: Error { case create(Int32), addFrame(Int32), addText(Int32), finish(Int32) }
 
     private var handle: OpaquePointer?
     private let onChunk: (Data) -> Void
     private let withConfidence: Bool
+    private var hasTextTrack = false
 
+    /// `textTrack` declares a WebVTT metadata track (chromapakz >= 0.5.0). It exists so
+    /// tools that will not install anything can read per-frame data: ffmpeg's Matroska
+    /// demuxer drops TagBinary, so the binary pose table is invisible to it.
     init(width: Int, height: Int, fps: Int, rgbKbps: Int,
          near: Double, far: Double, includeConfidence: Bool = false,
+         textTrack: String? = nil,
          onChunk: @escaping (Data) -> Void) throws {
         self.onChunk = onChunk
         self.withConfidence = includeConfidence
+        self.hasTextTrack = textTrack != nil
         var h: OpaquePointer?
         let rc = "depth".withCString { depthPtr -> Int32 in
             "confidence".withCString { confPtr -> Int32 in
@@ -27,10 +33,17 @@ final class ChromapakzStreamEncoder {
                     specs.append(dc_signal_spec_t(id: confPtr, data: nil, inverse_depth: 0,
                                                   near_: 0, far_: 0, levels: 65536))
                 }
-                return specs.withUnsafeBufferPointer { specBuf in
-                    dc_stream_create(Int32(width), Int32(height), Int32(fps), Int32(rgbKbps),
-                                     1 /* has_rgb */, 0 /* emit_cues */,
-                                     specBuf.baseAddress, Int32(specs.count), &h)
+                return specs.withUnsafeBufferPointer { specBuf -> Int32 in
+                    guard let name = textTrack else {
+                        return dc_stream_create(Int32(width), Int32(height), Int32(fps), Int32(rgbKbps),
+                                                1 /* has_rgb */, 0 /* emit_cues */,
+                                                specBuf.baseAddress, Int32(specs.count), &h)
+                    }
+                    return name.withCString { namePtr in
+                        dc_stream_create_ex(Int32(width), Int32(height), Int32(fps), Int32(rgbKbps),
+                                            1 /* has_rgb */, 0 /* emit_cues */,
+                                            specBuf.baseAddress, Int32(specs.count), namePtr, &h)
+                    }
                 }
             }
         }
@@ -63,6 +76,19 @@ final class ChromapakzStreamEncoder {
             }
         }
         guard rc == 0 else { throw EncoderError.addFrame(rc) }
+    }
+
+    /// Append one timed-text cue. Times are seconds on the media timeline.
+    func addText(_ text: String, timestamp: Double, duration: Double) throws {
+        guard let h = handle, hasTextTrack else { return }
+        var utf8 = Array(text.utf8)
+        try utf8.withUnsafeMutableBufferPointer { buf in
+            try takeChunk { out, len in
+                dc_stream_add_text(h, Int32((timestamp * 1000).rounded()),
+                                   Int32(max(0, (duration * 1000).rounded())),
+                                   buf.baseAddress, buf.count, out, len)
+            }
+        }
     }
 
     func finish() throws {
