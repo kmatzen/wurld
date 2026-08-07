@@ -67,6 +67,14 @@ final class PixelConverter {
         guard initRC == kvImageNoError else { throw ConvertError.convert(initRC) }
         defer { free(full.data) }
 
+        if let fp = full.data?.assumingMemoryBound(to: UInt8.self) {
+            let fo = (Int(full.height) / 2) * full.rowBytes + (Int(full.width) / 2) * 4
+            FileHandle.standardError.write(Data(
+                "DIAG full \(full.width)x\(full.height) rb=\(full.rowBytes) "
+                + "bpp?=\(CGImageAlphaInfo.premultipliedLast.rawValue) "
+                + "center=[\(fp[fo]),\(fp[fo+1]),\(fp[fo+2]),\(fp[fo+3])]\n".utf8))
+        }
+
         var out = [UInt8](repeating: 0, count: width * height * 4)
         let scaleRC: vImage_Error = out.withUnsafeMutableBytes { dstBytes in
             var dst = vImage_Buffer(data: dstBytes.baseAddress,
