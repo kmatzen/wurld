@@ -66,6 +66,12 @@ final class PixelConverter {
                           width: vImagePixelCount(CVPixelBufferGetWidthOfPlane(buffer, 1)),
                           rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 1)),
         ]
+        let diag = "DIAG AnyToAny src0=\(srcW)x\(srcH) "
+            + "src1=\(CVPixelBufferGetWidthOfPlane(buffer, 1))x\(CVPixelBufferGetHeightOfPlane(buffer, 1)) "
+            + "dst=\(srgbW)x\(srgbH) "
+            + "nsrc=\(vImageConverter_GetNumberOfSourceBuffers(converter!)) "
+            + "ndst=\(vImageConverter_GetNumberOfDestinationBuffers(converter!))\n"
+        FileHandle.standardError.write(Data(diag.utf8))
         let convRC = srcs.withUnsafeMutableBufferPointer { sp -> vImage_Error in
             vImageConvert_AnyToAny(converter!, sp.baseAddress!, &srgbFull, nil,
                                    vImage_Flags(kvImageNoFlags))
