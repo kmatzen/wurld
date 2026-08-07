@@ -38,7 +38,10 @@ targets:
         SWIFT_VERSION: "5.9"
         SWIFT_OBJC_BRIDGING_HEADER: Sources/WurldCam-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(SRCROOT)/Vendor/include
-        LIBRARY_SEARCH_PATHS: $(SRCROOT)/Vendor/lib
+        # Device and simulator need different slices of the vendored static
+        # libs (build both with ios/scripts/build-native.sh [--simulator]).
+        LIBRARY_SEARCH_PATHS[sdk=iphoneos*]: $(SRCROOT)/Vendor/lib
+        LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]: $(SRCROOT)/Vendor/lib-sim
         OTHER_LDFLAGS: "-lvpx -lchromapakz -lc++"
         TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES

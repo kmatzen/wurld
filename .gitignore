@@ -14,3 +14,5 @@ dist/
 
 # iOS archives / exports
 ios/build/
+ios/WurldCam/Vendor/lib-sim/
+ios/.native-build/
