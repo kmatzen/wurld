@@ -1,0 +1,48 @@
+name: publish-npm
+
+# Separate from publish.yml (PyPI) on purpose: the two registries are at
+# different points in their history — PyPI already carries 1.1.1 — so a shared
+# release trigger would fail on a duplicate upload for one of them. Dispatch
+# this when the JavaScript package needs to ship.
+on:
+  workflow_dispatch: {}
+  release:
+    types: [published]
+
+jobs:
+  publish-npm:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write        # provenance attestation, linking the tarball to this run
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm ci
+      - name: Node suite
+        run: npm test
+
+      # viewer/wurld.js *is* the shipped artifact — there is no build step, and
+      # `exports` points straight at it. A files entry that stopped matching
+      # would publish a package that imports to nothing, and npm would not
+      # complain. Fail here instead of on a user's install.
+      - name: The tarball carries what it claims
+        run: |
+          npm pack --dry-run --json > pack.json
+          node -e '
+            const f = require("./pack.json")[0].files.map(x => x.path);
+            const need = ["viewer/wurld.js", "SPEC.md", "README.md", "LICENSE"];
+            const missing = need.filter(n => !f.includes(n));
+            if (missing.length) { console.error("missing from npm tarball:", missing); process.exit(1); }
+            console.log("npm tarball carries " + f.length + " files, all required entries present");
+          '
+
+      - name: npm publish
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
