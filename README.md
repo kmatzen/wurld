@@ -1,5 +1,7 @@
 # wurld
 
+> **wurld** — the *World's Unbroken Record of Localization & Depth*
+> (formerly "wurld"; renamed in 1.1.0 — old files read forever)
 **Posed sensor video in one playable WebM** — RGB video + per-frame camera pose +
 intrinsics + timestamps + bit-exact metric depth (and confidence / object IDs), in a
 single file that an ordinary video player treats as plain RGB.
@@ -184,7 +186,7 @@ WurldCam remain fixture/harness-validated pending a real capture.
   layout confirmed against the app author's own snippets and four community
   parsers — column-major K, scalar-last ARKit quaternions, LZFSE float32-meters
   depth (NaN invalid, float16 export variant handled), 0/1/2 confidence. Needs
-  `pip install wurld-video[record3d]`.
+  `pip install wurld[record3d]`.
 - **MCAP export** (`wurld extract scene.wl.webm out.mcap --format mcap`):
   Foxglove-ready jsonschema channels (`/camera/pose`, `/camera/image` jpeg,
   `/camera/depth` 16UC1 bit-exact codes, `/camera/calibration`, `/imu/<id>`) plus

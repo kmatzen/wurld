@@ -540,18 +540,20 @@ def read(path: str | Path) -> Sequence:
     probe = cz.probe(data)
     all_tags = ebml.read_all_tags(data)
     raw = all_tags.get("WURLD")
+    if not isinstance(raw, str):  # legacy files written before the rename
+        raw = all_tags.get("WURLD")
     if not isinstance(raw, str):
         doc = {"cameras": {}, "frames": [], "signals": [], "world": {}}
     else:
         doc = json.loads(raw)
-        if doc.get("format") != "wurld":
+        if doc.get("format") not in ("wurld", "wurld"):
             raise ValueError(f"{path}: WURLD tag present but format={doc.get('format')!r}")
 
     # Pose precedence (SPEC §9): consolidated table > streamed chunks > JSON array.
     fb = doc.get("frames_binary")
     camera_keys = list(fb["cameras"]) if fb and "cameras" in fb else sorted(doc.get("cameras", {}))
-    table = all_tags.get("WURLD_FRAMES")
-    chunks = all_tags.get("WURLD_POSES")
+    table = all_tags.get("WURLD_FRAMES", all_tags.get("WURLD_FRAMES"))
+    chunks = all_tags.get("WURLD_POSES", all_tags.get("WURLD_POSES"))
     if isinstance(table, bytes):
         if fb is not None and fb.get("version", 1) != 1:
             raise ValueError(f"{path}: unsupported frames_binary version {fb.get('version')}")
@@ -569,7 +571,8 @@ def read(path: str | Path) -> Sequence:
 
     imu = {}
     for stream_id, meta in doc.get("imu", {}).items():
-        buf = all_tags.get(f"WURLD_IMU_{stream_id}")
+        buf = all_tags.get(f"WURLD_IMU_{stream_id}",
+                           all_tags.get(f"WURLD_IMU_{stream_id}"))
         if isinstance(buf, bytes):
             imu[stream_id] = ImuStream.unpack(stream_id, buf, meta)
 

@@ -267,7 +267,7 @@ class StreamReader:
                         string = bytes(buf[fs:fe]).decode()
                     elif fid == ebml.TAG_BINARY:
                         binary = bytes(buf[fs:fe])
-                if name == "WURLD" and string is not None:
+                if name in ("WURLD", "WURLD") and string is not None:
                     self.doc = json.loads(string)
                     fb = self.doc.get("frames_binary")
                     self._camera_keys = (
@@ -278,15 +278,16 @@ class StreamReader:
                         self.frames = [Frame.from_json(f) for f in self.doc["frames"]]
                         events.append(("frames_table", list(self.frames)))
                     events.append(("wurld", self.doc))
-                elif name == "WURLD_POSES" and binary is not None:
+                elif name in ("WURLD_POSES", "WURLD_POSES") and binary is not None:
                     chunk_frames = unpack_frames(binary, self._camera_keys)
                     self.frames.extend(chunk_frames)
                     events.append(("poses", chunk_frames))
-                elif name == "WURLD_FRAMES" and binary is not None:
+                elif name in ("WURLD_FRAMES", "WURLD_FRAMES") and binary is not None:
                     self.frames = unpack_frames(binary, self._camera_keys)
                     events.append(("frames_table", list(self.frames)))
-                elif name and name.startswith("WURLD_IMU_") and binary is not None:
-                    stream_id = name[len("WURLD_IMU_"):]
+                elif name and (name.startswith("WURLD_IMU_")
+                               or name.startswith("WURLD_IMU_")) and binary is not None:
+                    stream_id = name.split("_IMU_", 1)[1]
                     meta = (self.doc or {}).get("imu", {}).get(stream_id, {})
                     events.append(
                         ("imu", stream_id, ImuStream.unpack(stream_id, binary, meta).samples)

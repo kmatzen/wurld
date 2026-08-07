@@ -98,15 +98,15 @@ def fetch_header(fetch) -> RemoteHeader:
             else:
                 tags[name] = value
 
-    raw = tags.get("WURLD")
+    raw = tags.get("WURLD", tags.get("WURLD"))
     if not isinstance(raw, str):
         raise ValueError("no WURLD tag in the header region")
     doc = json.loads(raw)
 
     fb = doc.get("frames_binary")
     camera_keys = list(fb["cameras"]) if fb and "cameras" in fb else sorted(doc.get("cameras", {}))
-    table = tags.get("WURLD_FRAMES")
-    chunks = tags.get("WURLD_POSES")
+    table = tags.get("WURLD_FRAMES", tags.get("WURLD_FRAMES"))
+    chunks = tags.get("WURLD_POSES", tags.get("WURLD_POSES"))
     if isinstance(table, bytes):
         frames = unpack_frames(table, camera_keys)
     elif isinstance(chunks, bytes):
@@ -116,7 +116,7 @@ def fetch_header(fetch) -> RemoteHeader:
 
     imu = {}
     for stream_id, meta in doc.get("imu", {}).items():
-        buf = tags.get(f"WURLD_IMU_{stream_id}")
+        buf = tags.get(f"WURLD_IMU_{stream_id}", tags.get(f"WURLD_IMU_{stream_id}"))
         if isinstance(buf, bytes):
             imu[stream_id] = ImuStream.unpack(stream_id, buf, meta)
 
