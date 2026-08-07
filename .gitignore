@@ -11,3 +11,6 @@ ios/WurldCam/Vendor/
 ios/.native-build/
 dist/
 *.egg-info/
+
+# iOS archives / exports
+ios/build/

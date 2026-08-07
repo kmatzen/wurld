@@ -55,6 +55,7 @@
     <button id="play">▶</button>
     <input id="scrub" type="range" min="0" max="0" value="0" step="1">
     <span id="frameinfo">–</span>
+    <button id="fit" title="Recenter the 3D view on this frame's geometry">Fit view</button>
     <button id="open">Open file…</button>
   </div>
 </div>
@@ -134,9 +135,16 @@ function applyMetadata(tags, headline) {
   document.getElementById('drop').classList.add('hidden');
   const docStr = tags.WURLD;
   const doc = typeof docStr === 'string' ? JSON.parse(docStr) : null;
-  const framesBuf = tags.WURLD_FRAMES;
-  if (doc?.frames_binary && framesBuf instanceof Uint8Array) {
-    doc.frames = unpackBinaryFrames(framesBuf, doc.frames_binary.cameras);
+  // Pose precedence (SPEC §9): consolidated WURLD_FRAMES table, else the
+  // concatenated WURLD_POSES chunks, else the JSON array. frames_binary is a
+  // descriptor, not a precondition — a streaming writer emits the table
+  // without one, and camera indices then resolve against sorted camera keys.
+  if (doc) {
+    const fb = doc.frames_binary;
+    const cameraKeys = fb?.cameras ?? Object.keys(doc.cameras ?? {}).sort();
+    const table = tags.WURLD_FRAMES, chunks = tags.WURLD_POSES;
+    if (table instanceof Uint8Array) doc.frames = unpackBinaryFrames(table, cameraKeys);
+    else if (chunks instanceof Uint8Array) doc.frames = unpackBinaryFrames(chunks, cameraKeys);
   }
   state.doc = doc;
   state.poses = new Map(); state.cloudCache = new Map(); state.frames = [];
@@ -153,7 +161,11 @@ function applyMetadata(tags, headline) {
   state.fps = doc?.frames?.length > 1
     ? Math.max(1, 1 / ((doc.frames.at(-1).t - doc.frames[0].t) / (doc.frames.length - 1)))
     : 30;
-  if (state.poses.size) {  // center orbit on trajectory
+  // Provisional framing from the trajectory; refined to the actual geometry as
+  // soon as a cloud exists (fitView). The trajectory alone is a poor target —
+  // a handheld take walks a metre while looking at a scene metres ahead, so
+  // centring on the path leaves the thing you want to look at off screen.
+  if (state.poses.size) {
     let c = [0, 0, 0], k = 0, span = 1;
     for (const p of state.poses.values()) { c = [c[0]+p.t[0], c[1]+p.t[1], c[2]+p.t[2]]; k++; }
     c = c.map(v => v / k);
@@ -161,6 +173,7 @@ function applyMetadata(tags, headline) {
       span = Math.max(span, Math.hypot(p.t[0]-c[0], p.t[1]-c[1], p.t[2]-c[2]));
     state.orbit.target = c; state.orbit.dist = span * 2.5;
   }
+  state.fitted = false; state.userMoved = false;
   showMeta(headline);
   return doc;
 }
@@ -312,6 +325,28 @@ function cloudForFrame(i) {
   return cloud;
 }
 
+// Frame the orbit on what is actually drawn: the current cloud plus the
+// trajectory. Percentile bounds rather than min/max, so a handful of far
+// depth returns along a corridor don't push the scene into the distance.
+function fitView() {
+  const cloud = cloudForFrame(state.cur);
+  if (!cloud || !cloud.n) return false;
+  const lo = [], hi = [];
+  for (let ax = 0; ax < 3; ax++) {
+    const vals = new Float32Array(cloud.n);
+    for (let k = 0; k < cloud.n; k++) vals[k] = cloud.pos[k * 3 + ax];
+    vals.sort();
+    lo[ax] = vals[Math.floor(cloud.n * 0.02)];
+    hi[ax] = vals[Math.floor(cloud.n * 0.98)];
+  }
+  for (const p of state.poses.values())      // keep the camera path in frame
+    for (let ax = 0; ax < 3; ax++) { lo[ax] = Math.min(lo[ax], p.t[ax]); hi[ax] = Math.max(hi[ax], p.t[ax]); }
+  const extent = Math.max(0.4, Math.hypot(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]));
+  state.orbit.target = [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
+  state.orbit.dist = extent / (2 * Math.tan(25 * Math.PI / 180)) * 1.15;  // 50° vfov
+  return true;
+}
+
 // ---------- WebGL ----------
 const canvas = document.getElementById('gl');
 const gl = canvas.getContext('webgl2', { antialias: true });
@@ -370,6 +405,8 @@ function draw() {
   gl.viewport(0, 0, w, h);
   gl.clearColor(0.02, 0.03, 0.045, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.enable(gl.DEPTH_TEST);
+
+  if (!state.fitted && !state.userMoved && fitView()) state.fitted = true;
 
   const { az, el, dist, target } = state.orbit;
   const eye = [
@@ -521,23 +558,48 @@ function setFrame(i) {
   }
   drawPanes(i);
 }
-let lastTick = 0;
+// Playback follows each frame's own timestamp, not a uniform frame rate.
+// Real captures drop frames — an iPhone take can hold 30 fps for a while and
+// then stall for 300 ms — and stepping those frames at a constant rate turns
+// every stall into a teleport. Honouring t keeps motion at true speed and
+// renders a stall as a pause, which is what actually happened.
+let lastTick = 0, clockStart = 0, clockOffset = 0;
+function frameTime(i) { return state.poses.get(i)?.time; }
 function tick(ts) {
-  if (state.playing) {
-    if (ts - lastTick > 1000 / state.fps) {
-      lastTick = ts;
-      setFrame((state.cur + 1) % state.frames.length);
+  if (!state.playing) return;
+  const t0 = frameTime(0), tEnd = frameTime(state.frames.length - 1);
+  if (t0 != null && tEnd != null && tEnd > t0) {
+    const elapsed = clockOffset + (ts - clockStart) / 1000;
+    if (elapsed > tEnd - t0) {            // loop
+      clockStart = ts; clockOffset = 0; setFrame(0);
+    } else {
+      let i = state.cur;
+      while (i + 1 < state.frames.length) {
+        const tn = frameTime(i + 1);
+        if (tn == null || tn - t0 > elapsed) break;
+        i++;
+      }
+      if (i !== state.cur) setFrame(i);
     }
-    requestAnimationFrame(tick);
+  } else if (ts - lastTick > 1000 / state.fps) {   // no timestamps: uniform fallback
+    lastTick = ts;
+    setFrame((state.cur + 1) % state.frames.length);
   }
+  requestAnimationFrame(tick);
+}
+function resyncClock(ts) {
+  clockStart = ts;
+  const t0 = frameTime(0), tc = frameTime(state.cur);
+  clockOffset = t0 != null && tc != null ? tc - t0 : 0;
 }
 document.getElementById('play').onclick = () => {
   state.playing = !state.playing;
   document.getElementById('play').textContent = state.playing ? '⏸' : '▶';
-  if (state.playing) requestAnimationFrame(tick);
+  if (state.playing) { resyncClock(performance.now()); requestAnimationFrame(tick); }
 };
 document.getElementById('scrub').oninput = e => { state.playing = false;
   document.getElementById('play').textContent = '▶'; setFrame(+e.target.value); };
+document.getElementById('fit').onclick = () => { state.userMoved = false; fitView(); };
 
 // ---------- input ----------
 let dragging = false, panning = false, lx = 0, ly = 0;
@@ -550,6 +612,7 @@ canvas.addEventListener('pointermove', e => {
   if (!dragging) return;
   const dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
   const o = state.orbit;
+  state.userMoved = true;   // never yank the view back once it is theirs
   if (panning) {
     const s = o.dist / 600;
     const right = [Math.sin(o.az), -Math.cos(o.az), 0];
@@ -560,6 +623,7 @@ canvas.addEventListener('pointermove', e => {
 });
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
+  state.userMoved = true;
   state.orbit.dist = Math.min(500, Math.max(0.3, state.orbit.dist * Math.exp(e.deltaY * 0.001)));
 }, { passive: false });
 canvas.addEventListener('contextmenu', e => e.preventDefault());

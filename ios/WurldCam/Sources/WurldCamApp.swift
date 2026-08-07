@@ -11,10 +11,26 @@ struct WurldCamApp: App {
 struct ContentView: View {
     @StateObject private var capture = CaptureController()
     @State private var sharing = false
+    @State private var showingAbout = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
             ARPreview(session: capture.session).ignoresSafeArea()
+            VStack {
+                HStack {
+                    Spacer()
+                    Button { showingAbout = true } label: {
+                        Image(systemName: "info.circle")
+                            .font(.title3)
+                            .padding(10)
+                            .background(.black.opacity(0.55), in: Circle())
+                    }
+                    .accessibilityLabel("About and licences")
+                }
+                .padding(.horizontal, 20)
+                Spacer()
+            }
+            .foregroundStyle(.white)
             VStack(spacing: 12) {
                 Picker("format", selection: $capture.format) {
                     ForEach(CaptureFormat.allCases) { f in Text(f.rawValue).tag(f) }
@@ -64,6 +80,7 @@ struct ContentView: View {
                 ShareSheet(items: [url])
             }
         }
+        .sheet(isPresented: $showingAbout) { AcknowledgementsView() }
     }
 }
 

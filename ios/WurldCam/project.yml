@@ -15,9 +15,26 @@ targets:
         NSCameraUsageDescription: WurldCam records posed RGBD captures with the camera and LiDAR.
         UIRequiredDeviceCapabilities: [arkit]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        CFBundleDisplayName: WurldCam
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Only VP9 via libvpx, no proprietary crypto: declaring the exemption
+        # skips the export-compliance questionnaire on every upload.
+        ITSAppUsesNonExemptEncryption: false
+        # Expose Documents in the Files app so captures other than the most
+        # recent one can be retrieved without a Mac.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.wurld.WurldCam
+        # Signing: override DEVELOPMENT_TEAM on the xcodebuild command line to
+        # build under a different account.
+        DEVELOPMENT_TEAM: R5326Y7EZ4
+        CODE_SIGN_STYLE: Automatic
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.9"
         SWIFT_OBJC_BRIDGING_HEADER: Sources/WurldCam-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(SRCROOT)/Vendor/include

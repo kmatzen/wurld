@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Captures are written to the app's Documents container and never leave
+	     the device unless the user shares them. Nothing is collected or sent. -->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<!-- No required-reason APIs are used: the app touches FileManager only for
+	     the Documents URL and file creation, neither of which is on Apple's
+	     list (that covers file *timestamp* access, UserDefaults, disk space,
+	     system boot time and active keyboards). Audited 2026-08-06 — recheck
+	     if file attributes, UserDefaults or disk-space queries are added. -->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+</dict>
+</plist>

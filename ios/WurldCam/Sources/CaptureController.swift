@@ -45,6 +45,14 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var wlFile: FileHandle?
     private let wlNear = 0.1, wlFar = 12.0  // ARKit LiDAR effective range, metres
     private let writeQueue = DispatchQueue(label: "wurld.capture.write")
+    /// Frames handed to writeQueue but not yet encoded. The buffers we pass it
+    /// belong to the ARFrame, so holding a backlog starves ARKit's pixel-buffer
+    /// pool and it stops delivering frames entirely — a burst of drops rather
+    /// than an even slowdown. Skipping while busy keeps spacing uniform.
+    private let inFlightLock = NSLock()
+    private var inFlight = 0
+    private let maxInFlight = 1
+    private(set) var droppedFrames = 0
     /// Target capture cadence; ARKit delivers 60fps, LiDAR depth updates slower.
     private let frameInterval: TimeInterval = 1.0 / 30.0
     private var lastFrameTime: TimeInterval = -1
@@ -83,6 +91,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         }
         captureURL = url
         poses = []; timestamps = []; frameCount = 0; lastFrameTime = -1
+        inFlightLock.lock(); inFlight = 0; droppedFrames = 0; inFlightLock.unlock()
         isRecording = true
         statusText = "recording"
     }
@@ -105,7 +114,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                 }
                 DispatchQueue.main.async {
                     self.lastCaptureURL = self.captureURL
-                    self.statusText = "saved \(self.captureURL?.lastPathComponent ?? "") (\(self.frameCount) frames)"
+                    let skipped = self.droppedFrames > 0 ? ", \(self.droppedFrames) skipped" : ""
+                    self.statusText = "saved \(self.captureURL?.lastPathComponent ?? "") (\(self.frameCount) frames\(skipped))"
                 }
             } catch {
                 DispatchQueue.main.async { self.statusText = "finalize failed: \(error.localizedDescription)" }
@@ -118,6 +128,16 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         guard isRecording, let sceneDepth = frame.sceneDepth else { return }
         if frame.timestamp - lastFrameTime < frameInterval { return }
+
+        // Apply backpressure before claiming the frame: if the writer is still
+        // busy, drop this one now rather than queue it. A skipped frame costs
+        // one sample; a queued one stalls the session for several.
+        inFlightLock.lock()
+        let busy = inFlight >= maxInFlight
+        if busy { droppedFrames += 1 } else { inFlight += 1 }
+        inFlightLock.unlock()
+        if busy { return }
+
         lastFrameTime = frame.timestamp
 
         let index = frameCount
@@ -141,6 +161,9 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         let confidenceMap = sceneDepth.confidenceMap
         let timestamp = frame.timestamp
         writeQueue.async { [self] in
+            defer {
+                inFlightLock.lock(); inFlight -= 1; inFlightLock.unlock()
+            }
             do {
                 switch format {
                 case .r3d:
