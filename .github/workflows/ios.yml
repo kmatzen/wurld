@@ -1,0 +1,79 @@
+name: ios
+
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  pull_request:
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast signal on the vImage colour path: compile PixelConvert.swift on its own
+  # (Accelerate + CoreVideo + CoreGraphics, no ARKit, no chromapakz) and run the
+  # sRGB -> 4:2:0 -> sRGB round-trip. Catches channel/matrix/range mistakes in
+  # seconds without the full app build.
+  pixel-convert:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Round-trip colour test
+        working-directory: ios/WurldCam/Tests/PixelRoundTrip
+        run: |
+          swiftc -O ../../Sources/PixelConvert.swift main.swift -o roundtrip
+          ./roundtrip
+
+  # Full app build for the simulator. Compiles every Swift source — including the
+  # capture path (ARKit) and the simulator sensor — against the vendored native
+  # libs, which are cross-compiled from the public ChromaPakZ + libvpx.
+  app-build:
+    runs-on: macos-14
+    env:
+      # ChromaPakZ is pinned to the same release the rest of the repo depends on
+      # (pyproject/package.json: >=0.5.0). Bump together.
+      CHROMAPAKZ_REF: v0.5.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out ChromaPakZ (native core)
+        uses: actions/checkout@v4
+        with:
+          repository: kmatzen/ChromaPakZ
+          ref: ${{ env.CHROMAPAKZ_REF }}
+          path: chromapakz
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # The native slice (libvpx + libchromapakz, arm64 simulator) is expensive
+      # to rebuild — libvpx is compiled from source. Cache it on the build script
+      # plus the pinned ChromaPakZ ref.
+      - name: Cache vendored native libs
+        id: vendor-cache
+        uses: actions/cache@v4
+        with:
+          path: ios/WurldCam/Vendor
+          key: vendor-sim-${{ runner.os }}-${{ env.CHROMAPAKZ_REF }}-${{ hashFiles('ios/scripts/build-native.sh') }}
+
+      - name: Build native simulator libs
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        run: CHROMAPAKZ_SRC="$PWD/chromapakz" ios/scripts/build-native.sh --simulator
+
+      - name: Generate Xcode project
+        working-directory: ios/WurldCam
+        run: xcodegen generate
+
+      - name: Build (iOS Simulator, signing disabled)
+        run: |
+          xcodebuild \
+            -project ios/WurldCam/WurldCam.xcodeproj \
+            -scheme WurldCam \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
+            build

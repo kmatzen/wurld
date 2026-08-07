@@ -1,4 +1,3 @@
-import Accelerate
 import ARKit
 import Combine
 import Compression
@@ -33,16 +32,10 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     let session = ARSession()
     private let ciContext = CIContext()
-    /// Cached for the Core Image fallback render; avoids allocating an sRGB
-    /// colour space on every frame.
-    private let cachedSRGB = CGColorSpace(name: CGColorSpace.sRGB)!
-    /// vImage fast-path state: the YpCbCr->RGB conversion and a reused full-res
-    /// RGBA scratch buffer, both built once. Touched only on `writeQueue`, one
-    /// frame at a time (`maxInFlight == 1`), so no locking is needed.
-    private var yuvConversion = vImage_YpCbCrToARGB()
-    private var yuvConversionReady = false
-    private var argbScratch = vImage_Buffer()
-    private var argbScratchW = 0, argbScratchH = 0
+    /// Camera YpCbCr -> colour-managed sRGB RGBA at the depth grid, on the CPU
+    /// with vImage. Built once; touched only on `writeQueue`, one frame at a
+    /// time (`maxInFlight == 1`), so no locking is needed.
+    private let pixelConverter = PixelConverter()
     private var zip: ZipWriter?
     private var poses: [[Double]] = []
     private var timestamps: [Double] = []
@@ -74,10 +67,6 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     let simulated = SimulatedSensor()
     private var simTimer: Timer?
     #endif
-
-    deinit {
-        if argbScratch.data != nil { free(argbScratch.data) }
-    }
 
     func start() {
         #if targetEnvironment(simulator)
@@ -119,8 +108,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         inFlightLock.unlock()
         if busy { return }
 
-        guard let image = SimulatedSensor.makeBGRA(fromRGBA: sim.rgb,
-                                                   width: sim.depthWidth, height: sim.depthHeight),
+        guard let image = SimulatedSensor.makeYCbCr420(fromSRGBA: sim.rgb,
+                                                       width: sim.depthWidth, height: sim.depthHeight),
               let depth = SimulatedSensor.makeDepth(from: sim.depth,
                                                     width: sim.depthWidth, height: sim.depthHeight),
               let conf = SimulatedSensor.makeConfidence(from: sim.confidence,
@@ -327,7 +316,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             timestamp: max(0, timestamp - (wlFirstTimestamp ?? timestamp)),
             duration: frameInterval)
 
-        let rgba = rgbaPlane(image, width: dw, height: dh)
+        let rgba = try pixelConverter.sRGBA(from: image, width: dw, height: dh)
         let z = floatPlane(depth)
         var conf = [UInt16](repeating: 2, count: dw * dh)  // "high" when ARKit omits the map
         if let confidence {
@@ -342,114 +331,6 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         try wlEncoder?.addFrame(rgba: rgba,
                                 depth: ChromapakzStreamEncoder.quantize(z, near: wlNear, far: wlFar),
                                 confidence: conf)
-    }
-
-    /// Camera YpCbCr -> RGBA at the depth grid. The vImage path converts and
-    /// downscales on the CPU with SIMD, sidestepping Core Image's per-frame
-    /// filter graph and its synchronous GPU->CPU readback — the heaviest single
-    /// step in the write chain. Any pixel format that isn't 8-bit biplanar 4:2:0
-    /// (e.g. the simulator's BGRA feed) falls back to Core Image.
-    private func rgbaPlane(_ buffer: CVPixelBuffer, width: Int, height: Int) -> [UInt8] {
-        if let fast = rgbaPlaneAccelerate(buffer, width: width, height: height) {
-            return fast
-        }
-        return rgbaPlaneCoreImage(buffer, width: width, height: height)
-    }
-
-    private func rgbaPlaneAccelerate(_ buffer: CVPixelBuffer, width: Int, height: Int) -> [UInt8]? {
-        let fmt = CVPixelBufferGetPixelFormatType(buffer)
-        let fullRange = fmt == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-        let videoRange = fmt == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        guard fullRange || videoRange else { return nil }
-
-        CVPixelBufferLockBaseAddress(buffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-        guard CVPixelBufferGetPlaneCount(buffer) == 2,
-              let yBase = CVPixelBufferGetBaseAddressOfPlane(buffer, 0),
-              let cbcrBase = CVPixelBufferGetBaseAddressOfPlane(buffer, 1)
-        else { return nil }
-
-        let srcW = CVPixelBufferGetWidthOfPlane(buffer, 0)
-        let srcH = CVPixelBufferGetHeightOfPlane(buffer, 0)
-
-        if !yuvConversionReady, !buildYpCbCrConversion(buffer, fullRange: fullRange) { return nil }
-        guard ensureArgbScratch(width: srcW, height: srcH) else { return nil }
-
-        var srcYp = vImage_Buffer(data: yBase,
-                                  height: vImagePixelCount(srcH), width: vImagePixelCount(srcW),
-                                  rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 0))
-        var srcCbCr = vImage_Buffer(data: cbcrBase,
-                                    height: vImagePixelCount(CVPixelBufferGetHeightOfPlane(buffer, 1)),
-                                    width: vImagePixelCount(CVPixelBufferGetWidthOfPlane(buffer, 1)),
-                                    rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 1))
-
-        // permuteMap turns the canonical ARGB output into RGBA in the same pass.
-        let permute: [UInt8] = [1, 2, 3, 0]
-        let convRC = permute.withUnsafeBufferPointer { map in
-            vImageConvert_420Yp8_CbCr8ToARGB8888(&srcYp, &srcCbCr, &argbScratch,
-                                                 &yuvConversion, map.baseAddress, 255,
-                                                 vImage_Flags(kvImageNoFlags))
-        }
-        guard convRC == kvImageNoError else { return nil }
-
-        var out = [UInt8](repeating: 0, count: width * height * 4)
-        let scaleRC: vImage_Error = out.withUnsafeMutableBytes { dstBytes in
-            var dst = vImage_Buffer(data: dstBytes.baseAddress,
-                                    height: vImagePixelCount(height), width: vImagePixelCount(width),
-                                    rowBytes: width * 4)
-            return vImageScale_ARGB8888(&argbScratch, &dst, nil, vImage_Flags(kvImageNoFlags))
-        }
-        guard scaleRC == kvImageNoError else { return nil }
-        return out
-    }
-
-    /// Build the YpCbCr->RGB conversion once. Range comes from the pixel format;
-    /// the matrix (BT.601 vs BT.709) from the buffer's attachment, defaulting to
-    /// 601 when unspecified.
-    private func buildYpCbCrConversion(_ buffer: CVPixelBuffer, fullRange: Bool) -> Bool {
-        var pixelRange = fullRange
-            ? vImage_YpCbCrPixelRange(Yp_bias: 0, CbCr_bias: 128,
-                                      YpRangeMax: 255, CbCrRangeMax: 255,
-                                      YpMax: 255, YpMin: 0, CbCrMax: 255, CbCrMin: 0)
-            : vImage_YpCbCrPixelRange(Yp_bias: 16, CbCr_bias: 128,
-                                      YpRangeMax: 235, CbCrRangeMax: 240,
-                                      YpMax: 255, YpMin: 0, CbCrMax: 255, CbCrMin: 0)
-        var matrix = kvImage_YpCbCrToARGBMatrix_ITU_R_601_4.pointee
-        if let att = CVBufferGetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil)?
-            .takeUnretainedValue() as? String,
-           att == (kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String) {
-            matrix = kvImage_YpCbCrToARGBMatrix_ITU_R_709_2.pointee
-        }
-        let rc = vImageConvert_YpCbCrToARGB_GenerateConversion(
-            &matrix, &pixelRange, &yuvConversion,
-            kvImage420Yp8_CbCr8, kvImageARGB8888, vImage_Flags(kvImageNoFlags))
-        yuvConversionReady = rc == kvImageNoError
-        return yuvConversionReady
-    }
-
-    /// (Re)allocate the full-res RGBA scratch buffer when the camera size changes;
-    /// reused across frames within a session.
-    private func ensureArgbScratch(width: Int, height: Int) -> Bool {
-        if argbScratch.data != nil, argbScratchW == width, argbScratchH == height { return true }
-        if argbScratch.data != nil { free(argbScratch.data); argbScratch.data = nil }
-        let rc = vImageBuffer_Init(&argbScratch, vImagePixelCount(height), vImagePixelCount(width),
-                                   32, vImage_Flags(kvImageNoFlags))
-        guard rc == kvImageNoError else { argbScratch.data = nil; return false }
-        argbScratchW = width; argbScratchH = height
-        return true
-    }
-
-    private func rgbaPlaneCoreImage(_ buffer: CVPixelBuffer, width: Int, height: Int) -> [UInt8] {
-        var ci = CIImage(cvPixelBuffer: buffer)
-        let sx = CGFloat(width) / ci.extent.width, sy = CGFloat(height) / ci.extent.height
-        ci = ci.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
-        var out = [UInt8](repeating: 0, count: width * height * 4)
-        out.withUnsafeMutableBytes { buf in
-            ciContext.render(ci, toBitmap: buf.baseAddress!, rowBytes: width * 4,
-                             bounds: CGRect(x: 0, y: 0, width: width, height: height),
-                             format: .RGBA8, colorSpace: cachedSRGB)
-        }
-        return out
     }
 
     private func floatPlane(_ buffer: CVPixelBuffer) -> [Float] {

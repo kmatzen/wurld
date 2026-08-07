@@ -128,22 +128,11 @@ final class SimulatedSensor {
 /// Wrap the synthetic planes as CVPixelBuffers so they flow through exactly the
 /// same encode path as ARKit's, rather than a parallel one that could drift.
 extension SimulatedSensor {
-    static func makeBGRA(fromRGBA rgba: [UInt8], width: Int, height: Int) -> CVPixelBuffer? {
-        guard let pb = allocate(width: width, height: height,
-                                format: kCVPixelFormatType_32BGRA) else { return nil }
-        CVPixelBufferLockBaseAddress(pb, [])
-        defer { CVPixelBufferUnlockBaseAddress(pb, []) }
-        guard let base = CVPixelBufferGetBaseAddress(pb)?.assumingMemoryBound(to: UInt8.self)
-        else { return nil }
-        let stride = CVPixelBufferGetBytesPerRow(pb)
-        for y in 0..<height {
-            for x in 0..<width {
-                let s = (y * width + x) * 4, d = y * stride + x * 4
-                base[d] = rgba[s + 2]; base[d + 1] = rgba[s + 1]   // RGBA -> BGRA
-                base[d + 2] = rgba[s]; base[d + 3] = 255
-            }
-        }
-        return pb
+    /// A 4:2:0 full-range biplanar buffer, tagged BT.709, matching the format
+    /// and colour attachments of an ARKit camera frame so the capture path's
+    /// `PixelConverter` handles it identically — no simulator-only branch.
+    static func makeYCbCr420(fromSRGBA rgba: [UInt8], width: Int, height: Int) -> CVPixelBuffer? {
+        YCbCr420.make(fromSRGBA: rgba, width: width, height: height)
     }
 
     static func makeDepth(from depth: [Float], width: Int, height: Int) -> CVPixelBuffer? {
