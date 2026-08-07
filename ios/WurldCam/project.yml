@@ -19,5 +19,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.wurld.WurldCam
         SWIFT_VERSION: "5.9"
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/WurldCam-Bridging-Header.h
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Vendor/include
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/Vendor/lib
+        OTHER_LDFLAGS: "-lvpx -lchromapakz -lc++"
         TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES

@@ -94,7 +94,26 @@ file playing in a plain `<video>` element.
 - Viewer verified in Chrome (native WebCodecs decode, no WASM), including binary
   frame tables.
 
-## v0.5 (current): Record3D, MCAP/Foxglove, ranged viewer, nerfstudio
+## v0.6 (current): on-device wurld recording, ffmpeg-native metadata
+
+- **WurldCam v2**: the iOS app now records **wurld directly on-device** —
+  libvpx + the chromapakz C core cross-compiled for iOS
+  (`ios/scripts/build-native.sh`), Swift bindings over the `dc_stream_*`
+  streaming ABI, and a Swift port of the pose-weaving `StreamWriter`
+  (`.wl.webm` / `.r3d` toggle in the UI). The recording pipeline is verified
+  without a device: `ios/scripts/verify-pipeline.sh` compiles the app's own
+  writer+encoder for macOS, records a synthetic take, and validates it with the
+  Python reader (poses at f32 precision vs analytic ground truth, exact f64
+  timestamps, NaN-invalid depth preserved, chunked layout + consolidated table,
+  ffmpeg-clean). ARKit-on-hardware remains the one untested link.
+- **ffmpeg needs no patch**: ffprobe already surfaces the complete WURLD
+  JSON document as a format tag —
+  `ffprobe -show_entries format_tags=WURLD -of json scene.wl.webm` yields
+  cameras, conventions, and (for JSON-frame files) every pose, in any
+  ffmpeg-based tool. Binary pose tables/IMU tags don't surface; everything else
+  does. The roadmap's "ffmpeg demuxer patch" is retired as unnecessary.
+
+## v0.5: Record3D, MCAP/Foxglove, ranged viewer, nerfstudio
 
 - **Record3D importer** (`wurld convert capture.r3d out.wl.webm`): the .r3d zip
   layout confirmed against the app author's own snippets and four community
@@ -181,9 +200,9 @@ file playing in a plain `<video>` element.
   RUB→RDF pose conversion, honest RGB/depth resolution policy). *Validated against
   synthetic fixtures — a real capture to confirm conventions is welcome.*
 
-## Roadmap (v0.6+)
+## Roadmap (v0.7+)
 
-Real-device validation of the Stray/Polycam/Record3D importers (synthetic fixtures
-only so far — one capture from each app confirms the conventions); ARKit
-straight-from-device recorder; LeRobot depth-backend PR upstream; ffmpeg demuxer
-patch; viewer Cues-based random video access over ranges.
+Real-device validation: one WurldCam capture (either format) plus one
+Stray/Polycam/Record3D capture confirms every convention end to end; LeRobot
+depth-backend PR upstream (staged privately); viewer Cues-based random video
+access over ranges; confidence as a second on-device signal in WurldCam.

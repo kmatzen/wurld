@@ -7,13 +7,20 @@ into a **Record3D-compatible `.r3d`** file that wurld ingests directly:
 wurld convert wurld-2026-….r3d out.wl.webm     # needs [record3d] extra
 ```
 
-## Why .r3d and not wurld directly (v1)
+## Two formats (toggle in the UI)
 
-The wurld container carries chromapakz VP9-lossless tracks, which needs
-libvpx built for iOS. v1 sidesteps that: JPEG frames + LZFSE depth/confidence
-(Apple's Compression framework — zero third-party dependencies), the exact
-layout the existing importer is tested against. v2 will embed the chromapakz C
-core (`dc_stream_*` streaming ABI) and weave WURLD pose tags on-device.
+- **`.wl.webm` (default, v2)** — wurld recorded directly on-device:
+  chromapakz VP9-lossless depth via the `dc_stream_*` C ABI (libvpx cross-built
+  for iOS), poses woven live as `WURLD_POSES` chunk tags with a consolidated
+  table on stop. Crash-safe: an interrupted take is a valid, fully-posed file up
+  to the last flushed cluster. RGB rides at the depth grid (256x192), near/far
+  0.1–12 m. Build the native libs once: `ios/scripts/build-native.sh`.
+- **`.r3d` (v1)** — Record3D-compatible zip (JPEG + LZFSE depth/confidence),
+  zero native deps, converted on the desktop with `wurld convert`.
+
+The v2 pipeline is verified without a device: `ios/scripts/verify-pipeline.sh`
+compiles the app's own writer + encoder for macOS, records a synthetic take, and
+validates poses/depth/layout with the Python wurld reader and ffmpeg.
 
 Design notes:
 - Frames stay in **sensor (landscape) orientation** so pixels and
@@ -39,6 +46,7 @@ Requires an iPhone/iPad with LiDAR (Pro models). Not testable in the simulator
 
 ## Status
 
-Compiles against the iOS SDK; **not yet validated on a device** — the first
-real capture should be round-tripped through `wurld convert` and eyeballed
-in the viewer (trajectory shape, depth alignment) to confirm conventions.
+Compiles against the iOS SDK; the recording pipeline (encoder, pose weaving,
+conventions) is validated on macOS via the harness. **ARKit on hardware is the
+one untested link** — the first real capture in either format should be
+eyeballed in the viewer (trajectory shape, depth alignment).

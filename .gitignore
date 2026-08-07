@@ -7,3 +7,5 @@ __pycache__/
 *.cache/
 ios/WurldCam/WurldCam.xcodeproj/
 ios/WurldCam/build/
+ios/WurldCam/Vendor/
+ios/.native-build/

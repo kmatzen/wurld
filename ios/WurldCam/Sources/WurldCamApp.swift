@@ -16,6 +16,12 @@ struct ContentView: View {
         ZStack(alignment: .bottom) {
             ARPreview(session: capture.session).ignoresSafeArea()
             VStack(spacing: 12) {
+                Picker("format", selection: $capture.format) {
+                    ForEach(CaptureFormat.allCases) { f in Text(f.rawValue).tag(f) }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 240)
+                .disabled(capture.isRecording)
                 Text(capture.statusText)
                     .font(.system(.footnote, design: .monospaced))
                     .padding(6)

@@ -17,7 +17,14 @@ import simd
 /// Import on the desktop with `wurld convert capture.r3d out.wl.webm`.
 /// Frames stay in sensor (landscape) orientation so poses and pixels agree;
 /// the importer's ARKit RUB->RDF conversion assumes exactly that.
+enum CaptureFormat: String, CaseIterable, Identifiable {
+    case wurld = ".wl.webm"
+    case r3d = ".r3d"
+    var id: String { rawValue }
+}
+
 final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
+    @Published var format: CaptureFormat = .wurld
     @Published var isRecording = false
     @Published var frameCount = 0
     @Published var lastCaptureURL: URL?
@@ -32,6 +39,11 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var rgbSize: CGSize = .zero
     private var depthSize: (w: Int, h: Int) = (0, 0)
     private var captureURL: URL?
+    // wurld path (chromapakz on-device; RGB downscaled to the depth grid)
+    private var wlEncoder: ChromapakzStreamEncoder?
+    private var wlWriter: WurldStreamWriter?
+    private var wlFile: FileHandle?
+    private let wlNear = 0.1, wlFar = 12.0  // ARKit LiDAR effective range, metres
     private let writeQueue = DispatchQueue(label: "wurld.capture.write")
     /// Target capture cadence; ARKit delivers 60fps, LiDAR depth updates slower.
     private let frameInterval: TimeInterval = 1.0 / 30.0
@@ -54,9 +66,17 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         let name = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
         let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("wurld-\(name).r3d")
+            .appendingPathComponent("wurld-\(name)\(format.rawValue)")
         do {
-            zip = try ZipWriter(url: url)
+            switch format {
+            case .r3d:
+                zip = try ZipWriter(url: url)
+            case .wurld:
+                FileManager.default.createFile(atPath: url.path, contents: nil)
+                wlFile = try FileHandle(forWritingTo: url)
+                // encoder + writer are created on the first frame, when the
+                // depth grid and intrinsics are known
+            }
         } catch {
             statusText = "cannot create \(url.lastPathComponent): \(error.localizedDescription)"
             return
@@ -71,10 +91,18 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         isRecording = false
         statusText = "finalizing…"
         writeQueue.async { [self] in
-            defer { zip = nil }
+            defer { zip = nil; wlEncoder = nil; wlWriter = nil; wlFile = nil }
             do {
-                try zip?.add(name: "metadata", data: metadataJSON())
-                try zip?.finish()
+                switch format {
+                case .r3d:
+                    try zip?.add(name: "metadata", data: metadataJSON())
+                    try zip?.finish()
+                case .wurld:
+                    try wlEncoder?.finish()   // tail cluster(s) flow through weave
+                    wlWriter?.finish()        // consolidated WURLD_FRAMES table
+                    wlEncoder?.destroy()
+                    try wlFile?.close()
+                }
                 DispatchQueue.main.async {
                     self.lastCaptureURL = self.captureURL
                     self.statusText = "saved \(self.captureURL?.lastPathComponent ?? "") (\(self.frameCount) frames)"
@@ -98,24 +126,109 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         rgbSize = camera.imageResolution
 
         // ARKit camera.transform is camera-to-world in the gravity-aligned world.
-        let q = simd_quatf(camera.transform)
-        let t = camera.transform.columns.3
-        poses.append([Double(q.imag.x), Double(q.imag.y), Double(q.imag.z), Double(q.real),
-                      Double(t.x), Double(t.y), Double(t.z)])
-        timestamps.append(frame.timestamp)
+        let transform = camera.transform
+        if format == .r3d {
+            let q = simd_quatf(transform)
+            let t = transform.columns.3
+            poses.append([Double(q.imag.x), Double(q.imag.y), Double(q.imag.z), Double(q.real),
+                          Double(t.x), Double(t.y), Double(t.z)])
+            timestamps.append(frame.timestamp)
+        }
         frameCount += 1
 
         let capturedImage = frame.capturedImage
         let depthMap = sceneDepth.depthMap
         let confidenceMap = sceneDepth.confidenceMap
+        let timestamp = frame.timestamp
         writeQueue.async { [self] in
             do {
-                try writeFrame(index: index, image: capturedImage,
-                               depth: depthMap, confidence: confidenceMap)
+                switch format {
+                case .r3d:
+                    try writeFrame(index: index, image: capturedImage,
+                                   depth: depthMap, confidence: confidenceMap)
+                case .wurld:
+                    try writeWurldFrame(index: index, timestamp: timestamp,
+                                            transform: transform, image: capturedImage,
+                                            depth: depthMap)
+                }
             } catch {
                 DispatchQueue.main.async { self.statusText = "write failed: \(error.localizedDescription)" }
             }
         }
+    }
+
+    // MARK: wurld path
+
+    private func writeWurldFrame(index: Int, timestamp: Double,
+                                     transform: simd_float4x4, image: CVPixelBuffer,
+                                     depth: CVPixelBuffer) throws {
+        let dw = CVPixelBufferGetWidth(depth), dh = CVPixelBufferGetHeight(depth)
+        depthSize = (dw, dh)
+
+        if wlEncoder == nil {
+            // First frame: intrinsics and the depth grid are now known.
+            let K = intrinsics ?? matrix_identity_float3x3
+            let sx = Double(dw) / Double(rgbSize.width), sy = Double(dh) / Double(rgbSize.height)
+            let doc: [String: Any] = [
+                "format": "wurld", "version": "0.4",
+                "conventions": ["camera_axes": "RDF", "pose_direction": "camera_to_world",
+                                "quaternion_order": "wxyz", "units": "meters",
+                                "timestamp_units": "seconds"],
+                "world": ["metric_scale": true, "gravity_in_world": [0, -1, 0],
+                          "description": "WurldCam on-device recording (ARKit, RGB at depth grid)"],
+                "cameras": ["0": ["model": "PINHOLE", "width": dw, "height": dh,
+                                  "params": [Double(K[0][0]) * sx, Double(K[1][1]) * sy,
+                                             Double(K[2][0]) * sx, Double(K[2][1]) * sy]]],
+                "signals": [["id": "depth", "role": "depth",
+                             "value_map": ["type": "inverse_depth", "near": wlNear,
+                                           "far": wlFar, "levels": 65536, "invalid": 0]]],
+                "frames": [],
+            ]
+            let writer = try WurldStreamWriter(doc: doc) { [weak self] data in
+                self?.wlFile?.write(data)
+            }
+            wlWriter = writer
+            // Creating the encoder emits the mux header through weave immediately.
+            wlEncoder = try ChromapakzStreamEncoder(
+                width: dw, height: dh, fps: Int(round(1.0 / frameInterval)),
+                rgbKbps: 2000, near: wlNear, far: wlFar
+            ) { chunk in writer.weave(chunk) }
+        }
+
+        // Pose first: pending poses flush ahead of the cluster holding this frame.
+        wlWriter?.addPose(canonicalPose(index: UInt32(index), time: timestamp,
+                                        arkitTransform: transform))
+
+        let rgba = rgbaPlane(image, width: dw, height: dh)
+        let z = floatPlane(depth)
+        try wlEncoder?.addFrame(rgba: rgba,
+                                depth: ChromapakzStreamEncoder.quantize(z, near: wlNear, far: wlFar))
+    }
+
+    private func rgbaPlane(_ buffer: CVPixelBuffer, width: Int, height: Int) -> [UInt8] {
+        var ci = CIImage(cvPixelBuffer: buffer)
+        let sx = CGFloat(width) / ci.extent.width, sy = CGFloat(height) / ci.extent.height
+        ci = ci.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+        var out = [UInt8](repeating: 0, count: width * height * 4)
+        out.withUnsafeMutableBytes { buf in
+            ciContext.render(ci, toBitmap: buf.baseAddress!, rowBytes: width * 4,
+                             bounds: CGRect(x: 0, y: 0, width: width, height: height),
+                             format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+        }
+        return out
+    }
+
+    private func floatPlane(_ buffer: CVPixelBuffer) -> [Float] {
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let w = CVPixelBufferGetWidth(buffer), h = CVPixelBufferGetHeight(buffer)
+        let stride = CVPixelBufferGetBytesPerRow(buffer) / MemoryLayout<Float>.size
+        let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: Float.self)
+        var out = [Float](repeating: 0, count: w * h)
+        for row in 0..<h {
+            for col in 0..<w { out[row * w + col] = base[row * stride + col] }
+        }
+        return out
     }
 
     private func writeFrame(index: Int, image: CVPixelBuffer,
