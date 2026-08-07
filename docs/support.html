@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WurldCam Support</title>
+<style>
+  :root {
+    --bg: #ffffff; --text: #1c1e21; --dim: #5c6169;
+    --edge: #e3e6ea; --accent: #2f6fd0; --code: #f4f6f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e1117; --text: #e6e8eb; --dim: #9aa1ab;
+            --edge: #262b33; --accent: #6ea8fe; --code: #161b22; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 48px 20px 96px; background: var(--bg); color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 42rem; margin: 0 auto; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 .35rem; letter-spacing: -0.02em; }
+  .lede { color: var(--dim); margin: 0 0 2.2rem; padding-bottom: 1.4rem;
+          border-bottom: 1px solid var(--edge); }
+  h2 { font-size: 1.15rem; margin: 2.4rem 0 .6rem; letter-spacing: -0.01em; }
+  p, li { margin: 0 0 .8rem; }
+  ul { padding-left: 1.2rem; }
+  a { color: var(--accent); }
+  code { background: var(--code); border: 1px solid var(--edge); border-radius: 4px;
+         padding: .1em .35em; font-size: .9em; }
+  footer { margin-top: 3.5rem; padding-top: 1.4rem; border-top: 1px solid var(--edge);
+           color: var(--dim); font-size: .875rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>WurldCam Support</h1>
+  <p class="lede">Posed RGBD capture for iPhone.</p>
+
+  <h2>Requirements</h2>
+  <p>WurldCam needs a LiDAR-equipped device — iPhone 12 Pro or later Pro and Pro
+  Max models — running iOS 17 or later. On a device without LiDAR the app will
+  report that scene depth is unavailable.</p>
+
+  <h2>Getting your captures off the phone</h2>
+  <p>Tap the share button after a recording to send the most recent capture
+  anywhere iOS can share. Every capture, including older ones, is also available
+  in the <strong>Files</strong> app under <em>On My iPhone → WurldCam</em>, where
+  you can copy, move or delete them.</p>
+
+  <h2>Reading a capture</h2>
+  <p>Recordings are written in the open <code>wurld</code> format — a Matroska
+  container holding the colour video, lossless 16-bit depth, per-pixel confidence
+  and a per-frame pose table. Open-source Python and JavaScript readers, the file
+  format specification and a browser viewer are all at
+  <a href="https://github.com/kmatzen/wurld">github.com/kmatzen/wurld</a>.</p>
+  <p>The app can also record Record3D <code>.r3d</code> files if you need that
+  format instead.</p>
+
+  <h2>Frames being skipped</h2>
+  <p>The save message reports how many frames were skipped. Some skipping is
+  normal — the encoder deliberately drops a frame rather than let a backlog build
+  up, because a backlog stalls capture far worse. Recording in good light and
+  letting the device cool between long takes both help.</p>
+
+  <h2>Privacy</h2>
+  <p>Captures never leave your device unless you share them. See the
+  <a href="privacy.html">privacy policy</a>.</p>
+
+  <h2>Contact</h2>
+  <p>Bug reports and feature requests are best filed as
+  <a href="https://github.com/kmatzen/wurld/issues">GitHub issues</a>.
+  Otherwise email <a href="mailto:kmatzen@gmail.com">kmatzen@gmail.com</a>.</p>
+
+  <footer>
+    WurldCam is part of the open-source
+    <a href="https://github.com/kmatzen/wurld">wurld</a> project.
+  </footer>
+</main>
+</body>
+</html>
