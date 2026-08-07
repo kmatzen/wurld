@@ -16,3 +16,6 @@ dist/
 ios/build/
 ios/WurldCam/Vendor/lib-sim/
 ios/.native-build/
+
+# npm pack output
+*.tgz

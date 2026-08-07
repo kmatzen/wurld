@@ -1,19 +1,51 @@
 {
-  "name": "spatial",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "test": "tests"
+  "name": "@wurld/core",
+  "version": "1.1.1",
+  "description": "Reader, writer and live-streaming primitives for the wurld posed sensor-video format",
+  "type": "module",
+  "license": "MIT",
+  "author": "Kevin Blackburn-Matzen",
+  "homepage": "https://github.com/kmatzen/wurld#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kmatzen/wurld.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kmatzen/wurld/issues"
+  },
+  "keywords": [
+    "wurld", "depth", "rgbd", "lidar", "point-cloud", "pose",
+    "matroska", "webm", "ebml", "slam", "photogrammetry", "streaming"
+  ],
+  "exports": {
+    ".": "./viewer/wurld.js"
+  },
+  "main": "./viewer/wurld.js",
+  "files": [
+    "viewer/wurld.js",
+    "SPEC.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
-  "dependencies": {
+  "devDependencies": {
     "chromapakz": "^0.4.0"
+  },
+  "peerDependencies": {
+    "chromapakz": "^0.4.0"
+  },
+  "peerDependenciesMeta": {
+    "chromapakz": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
