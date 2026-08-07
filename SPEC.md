@@ -308,9 +308,48 @@ a remuxing finalizer MAY add one.
 - A file with no `WURLD` tag is a plain chromapakz file; libraries SHOULD read it
   as a sequence with no poses.
 
-## 11. Non-goals
+## 11. File scope: one rig, one clock
+
+A wurld file's atomic unit is **one rigidly-coupled sensor head on one
+clock**. The container's job is to make that head's internal synchronization
+unbreakable — shared timeline, shared Clusters, poses that cannot drift from
+pixels or be separated from them in transit.
+
+**Belongs in one file**: a stereo pair, a phone's RGB + LiDAR + IMU, a robot's
+head assembly — sensors that are hardware- or tightly-synced, rigidly mounted,
+and jointly calibrated (the `rigs` block, §8.1, describes exactly this
+coupling). Multiple synchronized RGB streams for such a rig are a planned
+payload-layer extension (multi-RGB chromapakz tracks; until then a file carries
+one camera's pixels plus every camera's calibration).
+
+**Belongs in several files**: separate agents, clocks, or mountings — two
+robots covering one scene, external mocap alongside an egocentric camera,
+camera arrays with independent clocks, or derived artifacts (a reconstruction
+stored beside its source capture). Their coupling is *soft* (estimated
+transforms, estimated clock offsets), and a single container would force a
+merge between producers that are naturally separate processes on separate
+machines. Composition across files is a **scene manifest** concern — a
+lightweight sidecar listing member files, each with a world-frame alignment
+(SE(3)/Sim(3)) and a clock offset — reserved for a future revision. The
+layering mirrors USD composition over single assets: the container stays
+simple and atomic; the scene lives one level above.
+
+Two rules follow:
+
+- Writers MUST NOT span multiple clocks in one file. If timestamps had to be
+  aligned by estimation, the sources belong in separate files under a manifest.
+- Writers SHOULD NOT interleave multiple cameras' frames in a single video
+  track. It is technically legal (frames carry per-frame `camera` ids and
+  equal timestamps are permitted), but it breaks plain-video playback,
+  misrepresents the track's frame rate, and muddies Cluster-level random
+  access; multi-camera pixels should wait for multi-RGB tracks.
+
+## 12. Non-goals
 
 - Not an editing/composition format (that's USD's job).
 - Not a delivery format for reconstructed 3D (that's glTF/3D Tiles/splats).
 - Not a general robot log (that's MCAP); wurld is the *camera-centric interchange*
   that logs and datasets convert through.
+- Not a multi-agent scene format — one file is one rig on one clock (§11);
+  cross-agent composition belongs to the future scene manifest, not the
+  container.
