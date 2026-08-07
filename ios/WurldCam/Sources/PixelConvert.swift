@@ -69,10 +69,9 @@ final class PixelConverter {
 
         if let fp = full.data?.assumingMemoryBound(to: UInt8.self) {
             let fo = (Int(full.height) / 2) * full.rowBytes + (Int(full.width) / 2) * 4
-            FileHandle.standardError.write(Data(
-                "DIAG full \(full.width)x\(full.height) rb=\(full.rowBytes) "
-                + "bpp?=\(CGImageAlphaInfo.premultipliedLast.rawValue) "
-                + "center=[\(fp[fo]),\(fp[fo+1]),\(fp[fo+2]),\(fp[fo+3])]\n".utf8))
+            let d = "DIAG full \(full.width)x\(full.height) rb=\(full.rowBytes) "
+                + "center=[\(fp[fo]),\(fp[fo + 1]),\(fp[fo + 2]),\(fp[fo + 3])]\n"
+            FileHandle.standardError.write(Data(d.utf8))
         }
 
         var out = [UInt8](repeating: 0, count: width * height * 4)
