@@ -70,6 +70,7 @@ class StreamWriter:
         fps: float = 30,
         has_rgb: bool = True,
         rgb_kbps: int = 2000,
+        pose_track: bool = False,
     ):
         import chromapakz as cz
 
@@ -115,10 +116,22 @@ class StreamWriter:
             cz_signals.append(spec)
         # cues=False: we interleave tag elements between clusters, which would
         # invalidate cue byte offsets (SPEC §9 forbids stale Cues).
+        # A WebVTT pose track alongside the binary table, so ffmpeg can read poses
+        # out of a live recording (its Matroska demuxer never surfaces TagBinary).
+        # The table stays authoritative and contiguous — see SPEC §9; this is an
+        # interop copy, not a replacement.
+        self._pose_track = bool(pose_track)
+        if self._pose_track and not hasattr(cz.StreamEncoder, "add_text"):
+            raise RuntimeError(
+                "pose_track needs chromapakz >= 0.5.0 (cz.create_encoder(text_track=...))"
+            )
+        kwargs = {"text_track": "wurld-poses"} if self._pose_track else {}
         self._enc = cz.create_encoder(
             cam0.width, cam0.height, signals=cz_signals, fps=max(1, round(fps)),
             has_rgb=has_rgb, rgb_kbps=rgb_kbps, on_chunk=self._weave, cues=False,
+            **kwargs,
         )
+        self._t0 = None
 
     def _emit(self, data: bytes) -> None:
         if data:
@@ -159,6 +172,19 @@ class StreamWriter:
             self._pending.append(pose)
             self._all.append(pose)
         self._enc.add_frame(rgb=rgb, signals=signals or {})
+        if self._pose_track and pose is not None and pose.pose_valid:
+            # Cue times are rebased to the media timeline: sensor clocks are absolute
+            # (ARKit reports device uptime) and a cue at t=71877s would sit far past
+            # the end of the video. The absolute value stays in the cue text.
+            if self._t0 is None:
+                self._t0 = pose.t
+            q, tr = pose.q_wxyz, pose.tr
+            self._enc.add_text(
+                f"i={pose.i} t={pose.t!r} camera={pose.camera} "
+                f"q_wxyz={q[0]!r},{q[1]!r},{q[2]!r},{q[3]!r} "
+                f"tr={tr[0]!r},{tr[1]!r},{tr[2]!r}",
+                timestamp=max(0.0, pose.t - self._t0),
+            )
 
     def add_imu(self, stream_id: str, samples: np.ndarray) -> None:
         """samples: (N, 7) [t, gyro xyz, accel xyz]; flushed with the next cluster."""

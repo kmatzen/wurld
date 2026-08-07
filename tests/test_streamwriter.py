@@ -159,3 +159,83 @@ def test_streamwriter_rejects_bad_quaternion(scene):
     bad = wl.Frame(i=0, t=0.0, q_wxyz=(2.0, 0, 0, 0), tr=(0, 0, 0))
     with pytest.raises(ValueError, match="not unit"):
         w.add_frame(bad, rgb=scene["rgba"][0], signals={"depth": {"u16": scene["d16"][0]}})
+
+
+# ── the pose track: poses reachable by tools that will not install wurld ──
+
+_HAS_TEXT_TRACK = hasattr(getattr(cz, "StreamEncoder", object), "add_text")
+needs_text_track = pytest.mark.skipif(
+    not _HAS_TEXT_TRACK, reason="needs chromapakz >= 0.5.0 (metadata track)"
+)
+needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
+
+
+def _record_with_pose_track(scene, out_parts, n=8):
+    w = StreamWriter(
+        out_parts.append,
+        cameras=scene["cameras"],
+        signal_meta=[
+            wl.SignalMeta(
+                "depth", "depth",
+                {"type": "inverse_depth", "near": NEAR, "far": FAR, "levels": 65536, "invalid": 0},
+            )
+        ],
+        fps=30,
+        has_rgb=True,
+        pose_track=True,
+    )
+    for i in range(n):
+        w.add_frame(
+            scene["frames"][i],
+            rgb=scene["rgba"][i],
+            signals={"depth": {"u16": scene["d16"][i]}},
+        )
+    return w.finish()
+
+
+@needs_text_track
+def test_pose_track_does_not_disturb_the_binary_table(scene, tmp_path):
+    """The track is additive: the table stays authoritative (SPEC §9)."""
+    parts = []
+    _record_with_pose_track(scene, parts)
+    path = tmp_path / "live.wl.webm"
+    path.write_bytes(b"".join(parts))
+
+    seq = wl.read(path)
+    assert len(seq.frames) == 8
+    for i, f in enumerate(seq.frames):
+        assert f.i == scene["frames"][i].i
+        assert f.t == pytest.approx(scene["frames"][i].t)
+
+
+@needs_text_track
+@needs_ffmpeg
+def test_ffmpeg_reads_poses_from_a_live_recording(scene, tmp_path):
+    """The whole point: no wurld install, no binary tag parsing, just ffmpeg."""
+    parts = []
+    _record_with_pose_track(scene, parts)
+    path = tmp_path / "live.wl.webm"
+    path.write_bytes(b"".join(parts))
+
+    out = tmp_path / "poses.vtt"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:s:0", "-c", "copy", "-y", str(out)],
+        check=True,
+    )
+    body = out.read_text()
+    assert body.startswith("WEBVTT")
+    # Absolute sensor timestamps stay in the payload even though cue times are
+    # rebased to the media timeline — a reader must not have to guess the offset.
+    for f in scene["frames"][:8]:
+        assert f"i={f.i} t={f.t!r}" in body
+
+
+@needs_text_track
+def test_pose_track_is_off_by_default(scene, tmp_path):
+    """Working files stay lean; the interop copy is opt-in at publish time."""
+    parts = []
+    _record(scene, parts, frames=6)
+    path = tmp_path / "plain.wl.webm"
+    path.write_bytes(b"".join(parts))
+    probe = wl.read(path)
+    assert len(probe.frames) == 6
