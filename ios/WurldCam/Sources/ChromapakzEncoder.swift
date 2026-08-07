@@ -11,18 +11,27 @@ final class ChromapakzStreamEncoder {
 
     private var handle: OpaquePointer?
     private let onChunk: (Data) -> Void
-    private let signalID = "depth"
+    private let withConfidence: Bool
 
     init(width: Int, height: Int, fps: Int, rgbKbps: Int,
-         near: Double, far: Double, onChunk: @escaping (Data) -> Void) throws {
+         near: Double, far: Double, includeConfidence: Bool = false,
+         onChunk: @escaping (Data) -> Void) throws {
         self.onChunk = onChunk
+        self.withConfidence = includeConfidence
         var h: OpaquePointer?
-        let rc = signalID.withCString { idPtr -> Int32 in
-            var spec = dc_signal_spec_t(id: idPtr, data: nil, inverse_depth: 1,
-                                        near_: near, far_: far, levels: 65536)
-            return withUnsafePointer(to: &spec) { specPtr in
-                dc_stream_create(Int32(width), Int32(height), Int32(fps), Int32(rgbKbps),
-                                 1 /* has_rgb */, 0 /* emit_cues */, specPtr, 1, &h)
+        let rc = "depth".withCString { depthPtr -> Int32 in
+            "confidence".withCString { confPtr -> Int32 in
+                var specs = [dc_signal_spec_t(id: depthPtr, data: nil, inverse_depth: 1,
+                                              near_: near, far_: far, levels: 65536)]
+                if includeConfidence {
+                    specs.append(dc_signal_spec_t(id: confPtr, data: nil, inverse_depth: 0,
+                                                  near_: 0, far_: 0, levels: 65536))
+                }
+                return specs.withUnsafeBufferPointer { specBuf in
+                    dc_stream_create(Int32(width), Int32(height), Int32(fps), Int32(rgbKbps),
+                                     1 /* has_rgb */, 0 /* emit_cues */,
+                                     specBuf.baseAddress, Int32(specs.count), &h)
+                }
             }
         }
         guard rc == 0, h != nil else { throw EncoderError.create(rc) }
@@ -30,19 +39,26 @@ final class ChromapakzStreamEncoder {
         try takeChunk { dc_stream_header(h, $0, $1) }
     }
 
-    /// rgba: W*H*4 bytes; depth: W*H uint16 inverse-depth codes.
-    func addFrame(rgba: [UInt8], depth: [UInt16]) throws {
+    /// rgba: W*H*4 bytes; depth: W*H uint16 inverse-depth codes;
+    /// confidence: W*H raw codes (0/1/2), required iff includeConfidence.
+    func addFrame(rgba: [UInt8], depth: [UInt16], confidence: [UInt16]? = nil) throws {
         guard let h = handle else { return }
-        let rc = try rgba.withUnsafeBufferPointer { rgbaBuf in
-            try depth.withUnsafeBufferPointer { depthBuf -> Int32 in
-                var planes: [UnsafePointer<UInt16>?] = [depthBuf.baseAddress]
-                return try planes.withUnsafeMutableBufferPointer { planesBuf in
-                    var out: UnsafeMutablePointer<UInt8>?
-                    var outLen: Int = 0
-                    let rc = dc_stream_add_frame(h, rgbaBuf.baseAddress,
-                                                 planesBuf.baseAddress, &out, &outLen)
-                    if rc == 0 { emit(out, outLen) }
-                    return rc
+        precondition((confidence != nil) == withConfidence,
+                     "confidence plane must match includeConfidence")
+        let conf = confidence ?? []
+        let rc = rgba.withUnsafeBufferPointer { rgbaBuf in
+            depth.withUnsafeBufferPointer { depthBuf -> Int32 in
+                conf.withUnsafeBufferPointer { confBuf -> Int32 in
+                    var planes: [UnsafePointer<UInt16>?] = [depthBuf.baseAddress]
+                    if withConfidence { planes.append(confBuf.baseAddress) }
+                    return planes.withUnsafeMutableBufferPointer { planesBuf in
+                        var out: UnsafeMutablePointer<UInt8>?
+                        var outLen: Int = 0
+                        let rc = dc_stream_add_frame(h, rgbaBuf.baseAddress,
+                                                     planesBuf.baseAddress, &out, &outLen)
+                        if rc == 0 { emit(out, outLen) }
+                        return rc
+                    }
                 }
             }
         }

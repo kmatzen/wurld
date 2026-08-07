@@ -210,6 +210,55 @@ def read_seek_head(data: bytes, payload_start: int, payload_end: int) -> dict[in
     return {}
 
 
+def read_cues(buf: bytes, pos: int = 0) -> list[tuple[int, int]]:
+    """Parse a Cues element at ``pos`` -> [(time_ms, segment-relative position)]."""
+    eid, p = _read_vint(buf, pos, keep_marker=True)
+    if eid != CUES:
+        raise ValueError(f"expected Cues element, found {eid:#x}")
+    size, p = _read_vint(buf, p, keep_marker=False)
+    out = []
+    for cid, cs, ce in iter_children(buf, p, p + size):
+        if cid != CUE_POINT:
+            continue
+        time_ms = position = None
+        for fid, fs, fe in iter_children(buf, cs, ce):
+            if fid == CUE_TIME:
+                time_ms = _read_uint(buf, fs, fe)
+            elif fid == CUE_TRACK_POSITIONS:
+                for gid, gs, ge in iter_children(buf, fs, fe):
+                    if gid == CUE_CLUSTER_POSITION:
+                        position = _read_uint(buf, gs, ge)
+        if time_ms is not None and position is not None:
+            out.append((time_ms, position))
+    return out
+
+
+def cluster_first_block_keyframes(buf: bytes, pos: int = 0) -> dict[int, bool]:
+    """First-block keyframe flag per track for the Cluster element at ``pos``."""
+    eid, p = _read_vint(buf, pos, keep_marker=True)
+    if eid != CLUSTER:
+        raise ValueError(f"expected Cluster element, found {eid:#x}")
+    size, p = _read_vint(buf, p, keep_marker=False)
+    first: dict[int, bool] = {}
+    for cid, cs, ce in iter_children(buf, p, p + size):
+        if cid == 0xA3:  # SimpleBlock
+            track, tp = _read_vint(buf, cs, keep_marker=False)
+            if track not in first:
+                first[track] = bool(buf[tp + 2] & 0x80)
+    return first
+
+
+def splice_file(prefix: bytes, seg_start: int, payload_parts: list[bytes]) -> bytes:
+    """Rebuild a standalone file: pre-Segment bytes + Segment(payload_parts)."""
+    payload = b"".join(payload_parts)
+    return (
+        prefix[:seg_start]
+        + _encode_id(SEGMENT)
+        + _encode_size(len(payload), length=8)
+        + payload
+    )
+
+
 def insert_header_tags(webm: bytes, tags: dict[str, str | bytes]) -> bytes:
     """Rebuild into the batch streaming layout (SPEC §9/§9.1): a SeekHead, then the
     original header elements, the wurld Tags, Clusters, and rebuilt Cues.

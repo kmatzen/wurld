@@ -149,7 +149,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                 case .wurld:
                     try writeWurldFrame(index: index, timestamp: timestamp,
                                             transform: transform, image: capturedImage,
-                                            depth: depthMap)
+                                            depth: depthMap, confidence: confidenceMap)
                 }
             } catch {
                 DispatchQueue.main.async { self.statusText = "write failed: \(error.localizedDescription)" }
@@ -161,7 +161,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     private func writeWurldFrame(index: Int, timestamp: Double,
                                      transform: simd_float4x4, image: CVPixelBuffer,
-                                     depth: CVPixelBuffer) throws {
+                                     depth: CVPixelBuffer, confidence: CVPixelBuffer?) throws {
         let dw = CVPixelBufferGetWidth(depth), dh = CVPixelBufferGetHeight(depth)
         depthSize = (dw, dh)
 
@@ -179,9 +179,14 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                 "cameras": ["0": ["model": "PINHOLE", "width": dw, "height": dh,
                                   "params": [Double(K[0][0]) * sx, Double(K[1][1]) * sy,
                                              Double(K[2][0]) * sx, Double(K[2][1]) * sy]]],
-                "signals": [["id": "depth", "role": "depth",
-                             "value_map": ["type": "inverse_depth", "near": wlNear,
-                                           "far": wlFar, "levels": 65536, "invalid": 0]]],
+                "signals": [
+                    ["id": "depth", "role": "depth",
+                     "value_map": ["type": "inverse_depth", "near": wlNear,
+                                   "far": wlFar, "levels": 65536, "invalid": 0]],
+                    ["id": "confidence", "role": "confidence",
+                     "value_map": ["type": "labels",
+                                   "labels": ["0": "low", "1": "medium", "2": "high"]]],
+                ],
                 "frames": [],
             ]
             let writer = try WurldStreamWriter(doc: doc) { [weak self] data in
@@ -191,7 +196,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             // Creating the encoder emits the mux header through weave immediately.
             wlEncoder = try ChromapakzStreamEncoder(
                 width: dw, height: dh, fps: Int(round(1.0 / frameInterval)),
-                rgbKbps: 2000, near: wlNear, far: wlFar
+                rgbKbps: 2000, near: wlNear, far: wlFar, includeConfidence: true
             ) { chunk in writer.weave(chunk) }
         }
 
@@ -201,8 +206,19 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
         let rgba = rgbaPlane(image, width: dw, height: dh)
         let z = floatPlane(depth)
+        var conf = [UInt16](repeating: 2, count: dw * dh)  // "high" when ARKit omits the map
+        if let confidence {
+            CVPixelBufferLockBaseAddress(confidence, .readOnly)
+            let stride = CVPixelBufferGetBytesPerRow(confidence)
+            let base = CVPixelBufferGetBaseAddress(confidence)!.assumingMemoryBound(to: UInt8.self)
+            for row in 0..<dh {
+                for col in 0..<dw { conf[row * dw + col] = UInt16(base[row * stride + col]) }
+            }
+            CVPixelBufferUnlockBaseAddress(confidence, .readOnly)
+        }
         try wlEncoder?.addFrame(rgba: rgba,
-                                depth: ChromapakzStreamEncoder.quantize(z, near: wlNear, far: wlFar))
+                                depth: ChromapakzStreamEncoder.quantize(z, near: wlNear, far: wlFar),
+                                confidence: conf)
     }
 
     private func rgbaPlane(_ buffer: CVPixelBuffer, width: Int, height: Int) -> [UInt8] {

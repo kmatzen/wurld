@@ -21,15 +21,19 @@ let doc: [String: Any] = [
               "description": "swift harness take"],
     "cameras": ["0": ["model": "PINHOLE", "width": W, "height": H,
                       "params": [48.0, 48.0, 31.5, 23.5]]],
-    "signals": [["id": "depth", "role": "depth",
-                 "value_map": ["type": "inverse_depth", "near": NEAR, "far": FAR,
-                               "levels": 65536, "invalid": 0]]],
+    "signals": [
+        ["id": "depth", "role": "depth",
+         "value_map": ["type": "inverse_depth", "near": NEAR, "far": FAR,
+                       "levels": 65536, "invalid": 0]],
+        ["id": "confidence", "role": "confidence",
+         "value_map": ["type": "labels", "labels": ["0": "low", "1": "medium", "2": "high"]]],
+    ],
     "frames": [],
 ]
 
 let writer = try WurldStreamWriter(doc: doc) { data in file.write(data) }
 let enc = try ChromapakzStreamEncoder(width: W, height: H, fps: FPS, rgbKbps: 500,
-                                      near: NEAR, far: FAR) { writer.weave($0) }
+                                      near: NEAR, far: FAR, includeConfidence: true) { writer.weave($0) }
 
 for i in 0..<N {
     // ARKit-style RUB c2w: orbit in the XZ plane, y-up world
@@ -62,7 +66,10 @@ for i in 0..<N {
                  : Float(0.5) + Float(u + v) / Float(W + H) * 8.0
         }
     }
-    try enc.addFrame(rgba: rgba, depth: ChromapakzStreamEncoder.quantize(z, near: NEAR, far: FAR))
+    var conf = [UInt16](repeating: 2, count: W * H)
+    conf[0] = 0  // the NaN-depth pixel is low confidence
+    try enc.addFrame(rgba: rgba, depth: ChromapakzStreamEncoder.quantize(z, near: NEAR, far: FAR),
+                     confidence: conf)
 }
 
 try enc.finish()

@@ -69,17 +69,66 @@ export function buildTags(entries) {
   return el(ID.TAGS, cat(tags));
 }
 
-/** Byte offset of the Segment payload (works on a truncated file prefix). */
-export function segmentPayloadStart(bytes) {
+/** {segStart, payloadStart} of the Segment (works on a truncated file prefix). */
+export function segmentBounds(bytes) {
   let pos = 0;
   while (pos < bytes.length) {
+    const segStart = pos;
     let id, size, sizeLen;
     [id, pos] = readVint(bytes, pos, true);
     [size, pos, sizeLen] = readVint(bytes, pos, false);
-    if (id === ID.SEGMENT) return pos;
+    if (id === ID.SEGMENT) return { segStart, payloadStart: pos };
     pos += size;
   }
   throw new Error('no Segment element');
+}
+
+export function segmentPayloadStart(bytes) { return segmentBounds(bytes).payloadStart; }
+
+function encodeSizeFixed8(size) {
+  // BigInt: the 8-byte vint marker (2^56) exceeds Number.MAX_SAFE_INTEGER.
+  const out = new Uint8Array(8);
+  let v = BigInt(size) | (1n << 56n);
+  for (let i = 7; i >= 0; i--) { out[i] = Number(v & 0xFFn); v >>= 8n; }
+  return out;
+}
+
+/** Standalone file: pre-Segment prefix + Segment(8-byte size, payloadParts). */
+export function spliceFile(head, segStart, payloadParts) {
+  const payload = cat(payloadParts);
+  return cat([head.subarray(0, segStart), encodeId(ID.SEGMENT),
+              encodeSizeFixed8(payload.length), payload]);
+}
+
+/** Parse a Cues element at the start of buf -> [{timeMs, pos}] (segment-relative). */
+export function readCues(buf) {
+  let pos = 0;
+  let id, size;
+  [id, pos] = readVint(buf, pos, true);
+  if (id !== ID.CUES) throw new Error('expected Cues element');
+  [size, pos] = readVint(buf, pos, false);
+  const out = [];
+  for (const [cid, cs, ce] of ebmlChildren(buf, pos, pos + size)) {
+    if (cid !== 0xBB) continue;  // CuePoint
+    let timeMs = null, position = null;
+    for (const [fid, fs, fe] of ebmlChildren(buf, cs, ce)) {
+      let v = 0;
+      if (fid === 0xB3) {  // CueTime
+        for (let i = fs; i < fe; i++) v = v * 256 + buf[i];
+        timeMs = v;
+      } else if (fid === 0xB7) {  // CueTrackPositions
+        for (const [gid, gs, ge] of ebmlChildren(buf, fs, fe)) {
+          if (gid === 0xF1) {  // CueClusterPosition
+            let w = 0;
+            for (let i = gs; i < ge; i++) w = w * 256 + buf[i];
+            position = w;
+          }
+        }
+      }
+    }
+    if (timeMs !== null && position !== null) out.push({ timeMs, pos: position });
+  }
+  return out;
 }
 
 /** {elementId: absolute offset} from the SeekHead at the Segment start (SPEC §9.1), or null. */

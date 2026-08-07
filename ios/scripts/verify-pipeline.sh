@@ -32,5 +32,8 @@ data = open(sys.argv[1], "rb").read()
 for off in range(0, len(data), 512):
     r.feed(data[off : off + 512])
 assert len(r.frames) == 20
-print("pipeline verification OK:", len(seq.frames), "frames, bit-checked")
+conf = seq.signal("confidence")
+assert conf.shape == (20, 48, 64) and conf[0, 0, 0] == 0 and (conf[:, 1:, :] == 2).all()
+assert seq.signal_meta("confidence").value_map["labels"]["2"] == "high"
+print("pipeline verification OK:", len(seq.frames), "frames + confidence, bit-checked")
 EOF

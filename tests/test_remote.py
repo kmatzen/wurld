@@ -71,3 +71,87 @@ def test_fetch_header_rejects_live_streams(scene, tmp_path):
     p.write_bytes(_make_live_style_stream(scene))
     with pytest.raises(ValueError, match="no SeekHead"):
         remote.fetch_header(remote.file_fetcher(p))
+
+
+def test_fetch_frames_random_access(wl_file, scene):
+    file_size = wl_file.stat().st_size
+    fetch, stats = counting_fetcher(wl_file)
+    hdr = remote.fetch_header(fetch)
+    header_bytes = stats["bytes"]
+
+    ref = wl.read(wl_file)
+    full_depth = ref.signal("depth")
+    full_rgb = ref.rgb
+
+    result = remote.fetch_frames(fetch, [7], header=hdr)
+    assert result["clusters_fetched"] == 1
+    got = result["frames"][7]
+    assert np.array_equal(got["signals"]["depth"], full_depth[7])  # bit-exact
+    assert np.array_equal(got["rgb"], np.asarray(full_rgb[7]))
+    # this fixture is single-cluster, so byte proportionality is exercised by
+    # test_fetch_frames_multi_cluster; here just sanity-check the accounting
+    assert 0 < result["bytes_fetched"] <= file_size + remote._CUES_FETCH
+    assert header_bytes < file_size
+
+
+def test_fetch_frames_multi_cluster(tmp_path):
+    import chromapakz as cz
+    from wurld.synthetic import make_sequence
+
+    rgb, depth_m, cameras, frames = make_sequence(n_frames=90, width=160, height=120, fps=30)
+    z = np.where(depth_m > 0, np.clip(depth_m, 0.5, 40.0), np.nan)
+    d16 = cz.quantize_inverse(z, near=0.5, far=40.0)
+    rgba = np.concatenate([rgb, np.full(rgb.shape[:3] + (1,), 255, np.uint8)], -1)
+    p = tmp_path / "long.wl.webm"
+    wl.write(p, cameras=cameras, frames=frames, rgb=rgba,
+             signals={"depth": d16}, specs={"depth": cz.inverse_depth_spec(0.5, 40.0)},
+             signal_meta=[wl.SignalMeta("depth", "depth",
+                 {"type": "inverse_depth", "near": 0.5, "far": 40.0, "levels": 65536, "invalid": 0})])
+    size = p.stat().st_size
+
+    fetch, stats = counting_fetcher(p)
+    hdr = remote.fetch_header(fetch)
+    before = stats["bytes"]
+    # frames 5 and 65 live in clusters 0 and 2 — cluster 1 must not be fetched
+    result = remote.fetch_frames(fetch, [5, 65, 66], header=hdr)
+    assert result["clusters_fetched"] == 2
+    assert np.array_equal(result["frames"][5]["signals"]["depth"], d16[5])
+    assert np.array_equal(result["frames"][65]["signals"]["depth"], d16[65])
+    assert np.array_equal(result["frames"][66]["signals"]["depth"], d16[66])
+    cluster_bytes = stats["bytes"] - before
+    assert cluster_bytes < size * 0.85  # skipped at least one cluster + header
+
+
+def test_fetch_frames_rejects_pre_cadence_files(tmp_path):
+    # simulate an old-encoder file by clearing the keyframe flag on the first
+    # depth block of a non-first cluster
+    import chromapakz as cz
+
+    from wurld import ebml
+    from wurld.synthetic import make_sequence
+
+    rgb, depth_m, cameras, frames = make_sequence(n_frames=60, width=96, height=72, fps=30)
+    d16 = cz.quantize_inverse(np.where(depth_m > 0, np.clip(depth_m, 0.5, 40.0), np.nan),
+                              near=0.5, far=40.0)
+    rgba = np.concatenate([rgb, np.full(rgb.shape[:3] + (1,), 255, np.uint8)], -1)
+    src = tmp_path / "multi.wl.webm"
+    wl.write(src, cameras=cameras, frames=frames, rgb=rgba,
+             signals={"depth": d16}, specs={"depth": cz.inverse_depth_spec(0.5, 40.0)})
+
+    data = bytearray(src.read_bytes())
+    _, ps, pe = ebml._segment_bounds(bytes(data))
+    clusters = [(es, pstart, pend) for eid, es, pstart, pend
+                in ebml._top_level(bytes(data), ps, pe) if eid == ebml.CLUSTER]
+    if len(clusters) < 2:
+        pytest.skip("test file has a single cluster")
+    es, pstart, pend = clusters[1]
+    for cid, cs, ce in ebml.iter_children(bytes(data), pstart, pend):
+        if cid == 0xA3:
+            track, tp = ebml._read_vint(bytes(data), cs, keep_marker=False)
+            if track == 2:
+                data[tp + 2] &= 0x7F  # clear keyframe bit
+                break
+    p = tmp_path / "old.wl.webm"
+    p.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="keyframe"):
+        remote.fetch_frames(remote.file_fetcher(p), [35])  # a cluster-1 frame

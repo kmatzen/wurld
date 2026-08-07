@@ -68,7 +68,8 @@
 <script type="module">
 import { createDecoder, dequantizeInverseDepth } from '../node_modules/chromapakz/src/chromapakz.js';
 import { ID, readWurldTags, unpackFrames as unpackBinaryFrames, readSeekHead,
-         segmentPayloadStart, collectTagsInRange } from './wurld.js';
+         segmentBounds, segmentPayloadStart, collectTagsInRange, readCues, spliceFile }
+  from './wurld.js';
 
 // ---------- tiny mat4 ----------
 const M = {
@@ -223,7 +224,16 @@ async function loadRemote(src) {
     head = joined; fetched = head.length;
   }
   const headerBytes = head.subarray(0, firstCluster);
-  const tags = collectTagsInRange(headerBytes, segmentPayloadStart(headerBytes), firstCluster);
+  const bounds = segmentBounds(headerBytes);
+  const tags = collectTagsInRange(headerBytes, bounds.payloadStart, firstCluster);
+  const chroma = typeof tags.CHROMAPAKZ === 'string' ? JSON.parse(tags.CHROMAPAKZ) : {};
+
+  const lazy = new URLSearchParams(location.search).get('lazy') === '1'
+    && seeks[ID.CUES] && chroma.frames > 0;
+  if (lazy) {
+    applyMetadata(tags, `lazy: ${src} — poses from ${(fetched / 1024).toFixed(1)} KB; clusters fetch on demand`);
+    return setupLazy(src, headerBytes, bounds, seeks, chroma, firstCluster);
+  }
   applyMetadata(tags, `ranged: ${src} — all poses from ${(fetched / 1024).toFixed(1)} KB, streaming video…`);
 
   // The <video> element streams independently via the server's own range support.
@@ -421,14 +431,87 @@ function drawPanes(i) {
   }
 }
 
+// ---------- lazy cluster access ----------
+const lazyState = { active: false };
+
+async function setupLazy(src, headerBytes, bounds, seeks, chroma, firstCluster) {
+  const cuesResp = await fetch(src, {
+    cache: 'no-store', headers: { Range: `bytes=${seeks[ID.CUES]}-${seeks[ID.CUES] + 65535}` },
+  });
+  const cues = readCues(new Uint8Array(await cuesResp.arrayBuffer()));
+  const fps = chroma.fps, n = chroma.frames;
+  Object.assign(lazyState, {
+    active: true, src, headerBytes, bounds, chroma,
+    cuesOffset: seeks[ID.CUES],
+    starts: cues.map(c => ({ frame: Math.round(c.timeMs * fps / 1000),
+                             offset: bounds.payloadStart + c.pos })),
+    loading: new Map(),  // cluster index -> Promise
+    requests: 2,         // head + cues so far
+  });
+  state.W = chroma.width; state.H = chroma.height;
+  state.frames = new Array(n).fill(null);
+  document.getElementById('scrub').max = n - 1;
+  const vid = document.getElementById('vid');
+  vid.src = src; vid.play().catch(() => {});
+  setFrame(0);
+}
+
+function lazyClusterOf(i) {
+  let k = 0;
+  lazyState.starts.forEach((s, j) => { if (s.frame <= i) k = j; });
+  return k;
+}
+
+async function ensureFrame(i) {
+  const k = lazyClusterOf(i);
+  if (!lazyState.loading.has(k)) {
+    lazyState.loading.set(k, (async () => {
+      const { src, headerBytes, bounds, starts, cuesOffset, chroma } = lazyState;
+      const start = starts[k].offset;
+      const end = (k + 1 < starts.length ? starts[k + 1].offset : cuesOffset) - 1;
+      const resp = await fetch(src, { cache: 'no-store', headers: { Range: `bytes=${start}-${end}` } });
+      lazyState.requests++;
+      const cluster = new Uint8Array(await resp.arrayBuffer());
+      const spliced = spliceFile(headerBytes, bounds.segStart,
+                                 [headerBytes.subarray(bounds.payloadStart), cluster]);
+      const dec = createDecoder(spliced);
+      const first = starts[k].frame;
+      const last = (k + 1 < starts.length ? starts[k + 1].frame : chroma.frames) - 1;
+      const wantedDepthId = (state.doc?.signals || []).find(s => s.role === 'depth')?.id;
+      let j = 0;
+      for (;;) {
+        const frame = await dec.readFrame();
+        if (!frame || first + j > last) break;
+        const rec = { rgb: frame.rgb ?? null, depth: null };
+        if (frame.signals) {
+          const depthId = wantedDepthId ?? Object.keys(frame.signals)[0];
+          if (depthId && frame.signals[depthId]) rec.depth = frame.signals[depthId].u16;
+        }
+        state.frames[first + j] = rec;
+        j++;
+      }
+      dec.close();
+    })());
+  }
+  await lazyState.loading.get(k);
+  showMeta(`lazy: ${lazyState.src} — ${lazyState.requests} ranged requests, ` +
+           `${state.frames.filter(Boolean).length}/${state.frames.length} frames cached`);
+}
+
 // ---------- frame control ----------
 function setFrame(i) {
   state.cur = i;
   document.getElementById('scrub').value = i;
   const pose = state.poses.get(i);
   const t = pose ? ` t=${pose.time.toFixed(3)}s` : '';
+  const missing = lazyState.active && !state.frames[i];
   document.getElementById('frameinfo').textContent =
-    `frame ${i + 1}/${state.frames.length}${t}`;
+    `frame ${i + 1}/${state.frames.length}${t}` + (missing ? ' (fetching…)' : '');
+  if (missing) {
+    ensureFrame(i).then(() => { if (state.cur === i) setFrame(i); })
+      .catch(e => console.error('ensureFrame', e));
+    return;
+  }
   drawPanes(i);
 }
 let lastTick = 0;

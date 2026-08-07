@@ -94,7 +94,27 @@ file playing in a plain `<video>` element.
 - Viewer verified in Chrome (native WebCodecs decode, no WASM), including binary
   frame tables.
 
-## v0.6 (current): on-device wurld recording, ffmpeg-native metadata
+## v0.7 (current): random video access over ranges
+
+- **Cluster-independent decode** (enabled by
+  [ChromaPakZ #45](https://github.com/kmatzen/ChromaPakZ/pull/45), pending merge):
+  signal tracks now keyframe at the RGB cadence, so `[header + Cluster k]`
+  decodes that second of footage bit-exactly in isolation (+1.0% file size).
+- **`wurld.remote.fetch_frames(fetch, indices)`**: random access to any
+  frames of a remote file — SeekHead → Cues → only the touched Clusters are
+  fetched and spliced-decoded. Verified: bit-exact vs full decode, untouched
+  clusters never downloaded, and a clear error for files written before the
+  keyframe cadence.
+- **Viewer lazy scrubbing** (`?lazy=1&src=…`): poses render from the header
+  instantly; video clusters fetch on demand as you scrub. Verified in Chrome:
+  jumping frame 1 → 81 of the demo took **4 ranged requests total** with the
+  middle cluster never downloaded.
+- **WurldCam confidence**: on-device recordings now carry ARKit confidence
+  as a second lossless signal (0/1/2 labels), verified device-free through the
+  macOS harness. (Note: `build-native.sh` needs a chromapakz checkout with
+  #45 for cluster-independent app recordings.)
+
+## v0.6: on-device wurld recording, ffmpeg-native metadata
 
 - **WurldCam v2**: the iOS app now records **wurld directly on-device** —
   libvpx + the chromapakz C core cross-compiled for iOS
@@ -200,9 +220,9 @@ file playing in a plain `<video>` element.
   RUB→RDF pose conversion, honest RGB/depth resolution policy). *Validated against
   synthetic fixtures — a real capture to confirm conventions is welcome.*
 
-## Roadmap (v0.7+)
+## Roadmap (v0.8+)
 
 Real-device validation: one WurldCam capture (either format) plus one
 Stray/Polycam/Record3D capture confirms every convention end to end; LeRobot
-depth-backend PR upstream (staged privately); viewer Cues-based random video
-access over ranges; confidence as a second on-device signal in WurldCam.
+depth-backend PR upstream (staged privately); merge ChromaPakZ #45 and cut a
+chromapakz PyPI release so wurld can pin released versions again.

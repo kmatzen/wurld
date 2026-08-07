@@ -61,6 +61,9 @@ class RemoteHeader:
     cues_offset: int | None
     bytes_fetched: int
     doc: dict = field(repr=False)
+    head: bytes = field(default=b"", repr=False)  # the fetched [0, header_extent) bytes
+    segment_start: int = 0  # offset of the Segment element id
+    payload_start: int = 0  # offset of the Segment payload
 
 
 def fetch_header(fetch) -> RemoteHeader:
@@ -69,7 +72,7 @@ def fetch_header(fetch) -> RemoteHeader:
     fetched = len(head)
     # _segment_bounds only reads the prefix elements; the (out-of-range) payload
     # end it reports for a truncated buffer is never dereferenced here.
-    _, payload_start, _ = ebml._segment_bounds(head)
+    segment_start, payload_start, _ = ebml._segment_bounds(head)
     seeks = ebml.read_seek_head(head, payload_start, len(head))
     first_cluster = seeks.get(ebml.CLUSTER)
     if first_cluster is None:
@@ -129,4 +132,95 @@ def fetch_header(fetch) -> RemoteHeader:
         cues_offset=seeks.get(ebml.CUES),
         bytes_fetched=fetched,
         doc=doc,
+        head=bytes(head[:first_cluster]),
+        segment_start=segment_start,
+        payload_start=payload_start,
     )
+
+
+_CUES_FETCH = 1 << 16  # Cues for hour-scale files fit comfortably in 64 KiB
+
+
+def fetch_frames(fetch, indices: list[int], header: RemoteHeader | None = None) -> dict:
+    """Randomly access video frames via ranged reads (SPEC §9.1 + Cues).
+
+    Fetches only the Clusters containing ``indices`` (plus the Cues, once) and
+    decodes each in isolation — possible because chromapakz keyframes every
+    track at cluster starts (ChromaPakZ PR #45). Returns::
+
+        {
+          "frames": {index: {"rgb": (H,W,4) uint8 | None,
+                             "signals": {id: (H,W) uint16}}},
+          "bytes_fetched": int,   # cues + clusters (header counted by fetch_header)
+          "clusters_fetched": int,
+        }
+
+    Raises:
+        ValueError: If the file has no Cues, or a fetched Cluster does not start
+            with keyframes on every track (written by chromapakz without the
+            signal-keyframe cadence — re-encode to enable random access).
+    """
+    import chromapakz as cz
+    import numpy as np
+
+    hdr = header or fetch_header(fetch)
+    if hdr.cues_offset is None:
+        raise ValueError("no Cues entry in the SeekHead — cannot random-access video")
+    meta = hdr.video
+    fps, n_frames = meta["fps"], meta["frames"]
+    if not fps or not n_frames:
+        raise ValueError("chromapakz metadata lacks fps/frames (live stream? use StreamReader)")
+
+    fetched = 0
+    cues_buf = fetch(hdr.cues_offset, _CUES_FETCH)
+    fetched += len(cues_buf)
+    cues = ebml.read_cues(cues_buf)
+    if not cues:
+        raise ValueError("empty Cues element")
+    # cue positions are relative to the Segment payload start
+    starts = [(round(t * fps / 1000), hdr.payload_start + pos) for t, pos in cues]
+
+    def cluster_of(frame: int) -> int:
+        k = 0
+        for j, (f0, _) in enumerate(starts):
+            if f0 <= frame:
+                k = j
+        return k
+
+    wanted: dict[int, list[int]] = {}
+    for i in indices:
+        if not 0 <= i < n_frames:
+            raise IndexError(f"frame {i} out of range [0, {n_frames})")
+        wanted.setdefault(cluster_of(i), []).append(i)
+
+    out: dict[int, dict] = {}
+    for k, frame_indices in sorted(wanted.items()):
+        first_frame, offset = starts[k]
+        end = starts[k + 1][1] if k + 1 < len(starts) else hdr.cues_offset
+        cluster = fetch(offset, end - offset)
+        fetched += len(cluster)
+
+        flags = ebml.cluster_first_block_keyframes(cluster)
+        if not all(flags.values()):
+            raise ValueError(
+                "cluster does not start with keyframes on every track "
+                f"(per-track: {flags}) — this file predates chromapakz's "
+                "signal-keyframe cadence (ChromaPakZ PR #45); re-encode it to "
+                "enable random access"
+            )
+
+        spliced = ebml.splice_file(
+            hdr.head, hdr.segment_start,
+            [hdr.head[hdr.payload_start:], cluster],
+        )
+        decoded = cz.decode(spliced)
+        expected = (starts[k + 1][0] if k + 1 < len(starts) else n_frames) - first_frame
+        for i in frame_indices:
+            local = i - first_frame
+            if local >= expected:
+                raise ValueError(f"frame {i} beyond cluster extent ({expected} frames)")
+            out[i] = {
+                "rgb": np.asarray(decoded["rgb"][local]) if decoded.get("rgb") is not None else None,
+                "signals": {sid: np.asarray(arr[local]) for sid, arr in decoded["signals"].items()},
+            }
+    return {"frames": out, "bytes_fetched": fetched, "clusters_fetched": len(wanted)}
