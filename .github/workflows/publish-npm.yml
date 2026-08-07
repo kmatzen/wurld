@@ -42,18 +42,6 @@ jobs:
             console.log("npm tarball carries " + f.length + " files, all required entries present");
           '
 
-      # Temporary: npm answers 404 for both "no such package" and "token may not
-      # create it", so ask what this token can actually see before publishing.
-      - name: token diagnostics
-        continue-on-error: true
-        run: |
-          echo "--- whoami ---";        npm whoami || echo "FAILED"
-          echo "--- org membership ---"; npm org ls wurld || echo "FAILED"
-          echo "--- @wurld packages ---"; npm access list packages wurld || echo "FAILED"
-          echo "--- token type ---";     npm token list 2>&1 | head -5 || echo "FAILED"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: npm publish
         run: npm publish --provenance --access public
         env:
