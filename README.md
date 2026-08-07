@@ -22,25 +22,35 @@ zoo of parsers. wurld replaces the zoo with one canonical-convention container:
   camera-to-world, wxyz quaternions, meters, seconds. Converters normalize on write;
   consumers never branch on axis flags.
 
+## Install
+
+```sh
+pip install wurld                 # Python reader/writer, converters, CLI
+npm install wurld-core            # JavaScript: same format, byte-identical records
+```
+
+Optional Python extras: `wurld[record3d]` for `.r3d` imports, `wurld[mcap]` for
+Foxglove export, `wurld[dev]` for the test suite.
+
 ## Quickstart
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+# working from a checkout instead: pip install -e ".[dev]"
 
 # write a synthetic demo sequence (analytic RGBD + orbit poses)
-.venv/bin/wurld demo demo.wl.webm
+wurld demo demo.wl.webm
 
 # inspect
-.venv/bin/wurld info demo.wl.webm
+wurld info demo.wl.webm
 
 # convert real datasets (auto-detects TUM / transforms.json / COLMAP / Stray Scanner)
-.venv/bin/wurld convert path/to/rgbd_dataset_freiburg1_desk desk.wl.webm
-.venv/bin/wurld convert path/to/transforms.json scene.wl.webm
-.venv/bin/wurld convert path/to/colmap_project scene.wl.webm --images path/to/images
-.venv/bin/wurld convert path/to/stray_capture scan.wl.webm       # needs ffmpeg on PATH
+wurld convert path/to/rgbd_dataset_freiburg1_desk desk.wl.webm
+wurld convert path/to/transforms.json scene.wl.webm
+wurld convert path/to/colmap_project scene.wl.webm --images path/to/images
+wurld convert path/to/stray_capture scan.wl.webm       # needs ffmpeg on PATH
 
 # extract back out
-.venv/bin/wurld extract demo.wl.webm out/ --format tum        # or transforms | colmap
+wurld extract demo.wl.webm out/ --format tum        # or transforms | colmap
 ```
 
 Python API:
@@ -61,10 +71,29 @@ seq.imu["imu0"].samples  # (N, 7) [t, gyro xyz, accel xyz]
 Long sequences (>10k frames) automatically pack poses into a binary frame table
 (45 bytes/frame; SPEC §7) — `wl.write(..., frames_format="binary")` forces it.
 
+JavaScript API (`wurld-core`, no dependencies — works in browsers and Node):
+
+```js
+import { readWurldTags, unpackFrames, WurldRecorder, StreamSplitter } from 'wurld-core';
+
+const tags = readWurldTags(bytes);            // SimpleTags: strings last-win, binaries concatenate
+const doc = JSON.parse(tags.WURLD);           // cameras, signals, conventions
+const keys = doc.frames_binary?.cameras ?? Object.keys(doc.cameras).sort();
+const frames = unpackFrames(tags.WURLD_FRAMES ?? tags.WURLD_POSES, keys);
+frames[0].t;                                  // seconds; .q_wxyz, .tr, .pose_valid
+```
+
+The 45-byte records are byte-identical to the Python writer's — the parity suite
+asserts it rather than assuming it. Pose precedence is `WURLD_FRAMES`, then
+`WURLD_POSES` chunks, then the JSON array (SPEC §9).
+
+Writing live (`WurldRecorder`) needs a chromapakz encoder, which you supply — it
+is an optional peer dependency, so reading costs you no native install.
+
 ## Browser viewer
 
 ```sh
-npm install                      # fetches the chromapakz decoder
+npm install                      # fetches the chromapakz decoder for the demo
 python3 -m http.server 8000      # from the repo root
 # open http://localhost:8000/viewer/index.html  and drop a .wl.webm
 # (or .../viewer/index.html?src=../demo.wl.webm)
