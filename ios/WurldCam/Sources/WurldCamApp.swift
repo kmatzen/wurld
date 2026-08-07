@@ -15,7 +15,12 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
+            #if targetEnvironment(simulator)
+            ARPreview(session: capture.session,
+                      image: capture.simulated.previewImage).ignoresSafeArea()
+            #else
             ARPreview(session: capture.session).ignoresSafeArea()
+            #endif
             VStack {
                 HStack {
                     Spacer()
@@ -74,7 +79,18 @@ struct ContentView: View {
             .padding(.bottom, 28)
             .foregroundStyle(.white)
         }
-        .onAppear { capture.start() }
+        .onAppear {
+            capture.start()
+            #if targetEnvironment(simulator)
+            // Screenshot automation: --simulate-recording drops straight into the
+            // recording state so the capture UI can be captured unattended.
+            if ProcessInfo.processInfo.arguments.contains("--simulate-recording") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    capture.beginRecording()
+                }
+            }
+            #endif
+        }
         .sheet(isPresented: $sharing) {
             if let url = capture.lastCaptureURL {
                 ShareSheet(items: [url])
@@ -84,6 +100,28 @@ struct ContentView: View {
     }
 }
 
+#if targetEnvironment(simulator)
+/// Simulator has no camera, so ARSCNView renders nothing. Show the synthetic
+/// scene the simulated sensor is feeding the pipeline instead.
+struct ARPreview: View {
+    let session: ARSession
+    let image: UIImage?
+
+    var body: some View {
+        GeometryReader { geo in
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+            } else {
+                Color.black
+            }
+        }
+    }
+}
+#else
 struct ARPreview: UIViewRepresentable {
     let session: ARSession
 
@@ -96,6 +134,7 @@ struct ARPreview: UIViewRepresentable {
 
     func updateUIView(_ view: ARSCNView, context: Context) {}
 }
+#endif
 
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]

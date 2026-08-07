@@ -35,6 +35,10 @@ targets:
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The synthetic scene backing the simulator's fake sensor must never
+        # reach a shipping build; SimulatedSensor.swift is #if-guarded, but an
+        # asset catalog compiles regardless, so exclude it for device SDKs.
+        EXCLUDED_SOURCE_FILE_NAMES[sdk=iphoneos*]: SimulatedAssets.xcassets
         SWIFT_VERSION: "5.9"
         SWIFT_OBJC_BRIDGING_HEADER: Sources/WurldCam-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(SRCROOT)/Vendor/include

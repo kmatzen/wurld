@@ -58,8 +58,17 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var lastFrameTime: TimeInterval = -1
     /// Halve RGB (1920x1440 -> 960x720) to keep captures small; K scales to match.
     private let rgbScale: CGFloat = 0.5
+    #if targetEnvironment(simulator)
+    let simulated = SimulatedSensor()
+    private var simTimer: Timer?
+    #endif
 
     func start() {
+        #if targetEnvironment(simulator)
+        // No camera or LiDAR here; drive the same pipeline from a synthetic source.
+        statusText = "ready"
+        startSimulatedFeed()
+        #else
         let config = ARWorldTrackingConfiguration()
         guard ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) else {
             statusText = "this device has no LiDAR scene depth"
@@ -68,7 +77,68 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         config.frameSemantics = [.sceneDepth]
         session.delegate = self
         session.run(config)
+        #endif
     }
+
+    #if targetEnvironment(simulator)
+    // MARK: Simulated sensor (simulator only — never compiled for a device)
+
+    private func startSimulatedFeed() {
+        simTimer = Timer.scheduledTimer(withTimeInterval: frameInterval, repeats: true) {
+            [weak self] _ in self?.simulatedTick()
+        }
+    }
+
+    private func simulatedTick() {
+        guard isRecording else { return }
+        let sim = simulated
+        let index = frameCount
+        let timestamp = Double(index) * frameInterval
+        intrinsics = sim.intrinsics
+        rgbSize = CGSize(width: sim.depthWidth, height: sim.depthHeight)
+
+        inFlightLock.lock()
+        let busy = inFlight >= maxInFlight
+        if busy { droppedFrames += 1 } else { inFlight += 1 }
+        inFlightLock.unlock()
+        if busy { return }
+
+        guard let image = SimulatedSensor.makeBGRA(fromRGBA: sim.rgb,
+                                                   width: sim.depthWidth, height: sim.depthHeight),
+              let depth = SimulatedSensor.makeDepth(from: sim.depth,
+                                                    width: sim.depthWidth, height: sim.depthHeight),
+              let conf = SimulatedSensor.makeConfidence(from: sim.confidence,
+                                                        width: sim.depthWidth, height: sim.depthHeight)
+        else {
+            inFlightLock.lock(); inFlight -= 1; inFlightLock.unlock()
+            return
+        }
+        let transform = sim.transform(forFrame: index)
+        if format == .r3d {
+            let q = simd_quatf(transform), t = transform.columns.3
+            poses.append([Double(q.imag.x), Double(q.imag.y), Double(q.imag.z), Double(q.real),
+                          Double(t.x), Double(t.y), Double(t.z)])
+            timestamps.append(timestamp)
+        }
+        frameCount += 1
+
+        writeQueue.async { [self] in
+            defer { inFlightLock.lock(); inFlight -= 1; inFlightLock.unlock() }
+            do {
+                switch format {
+                case .r3d:
+                    try writeFrame(index: index, image: image, depth: depth, confidence: conf)
+                case .wurld:
+                    try writeWurldFrame(index: index, timestamp: timestamp,
+                                        transform: transform, image: image,
+                                        depth: depth, confidence: conf)
+                }
+            } catch {
+                DispatchQueue.main.async { self.statusText = "write failed: \(error.localizedDescription)" }
+            }
+        }
+    }
+    #endif
 
     func beginRecording() {
         let name = ISO8601DateFormatter().string(from: Date())
