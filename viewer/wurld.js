@@ -381,8 +381,8 @@ export class WurldLivePlayer {
   _consumeTags(elem) {
     const tags = collectTags(elem.bytes, elem.payload[0], elem.payload[1], {});
     const names = Object.keys(tags);
-    if (!names.some(n => n.startsWith('WURLD') || n.startsWith('WURLD'))) return false;  // chromapakz's: forward
-    const docStr = tags.WURLD ?? tags.WURLD;
+    if (!names.some(n => n.startsWith('WURLD'))) return false;  // chromapakz's: forward
+    const docStr = tags.WURLD;
     if (typeof docStr === 'string') {
       this.doc = JSON.parse(docStr);
       const fb = this.doc.frames_binary;
@@ -393,13 +393,13 @@ export class WurldLivePlayer {
       }
       this._onDoc?.(this.doc);
     }
-    const posesBuf = tags.WURLD_POSES ?? tags.WURLD_POSES;
+    const posesBuf = tags.WURLD_POSES;
     if (posesBuf instanceof Uint8Array) {
       const chunkFrames = unpackFrames(posesBuf, this._cameraKeys);
       this.frames.push(...chunkFrames);
       this._onPoses?.(chunkFrames);
     }
-    const tableBuf = tags.WURLD_FRAMES ?? tags.WURLD_FRAMES;
+    const tableBuf = tags.WURLD_FRAMES;
     if (tableBuf instanceof Uint8Array) {
       this.frames = unpackFrames(tableBuf, this._cameraKeys);
       this._onPoses?.(this.frames);

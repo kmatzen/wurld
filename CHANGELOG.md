@@ -2,14 +2,10 @@
 
 ## 1.1.0 — 2026-08-06
 
-**Renamed: wurld → wurld** (*the World's Unbroken Record of Localization &
-Depth*), shedding the payments-company name collision while keeping the word
-you say out loud. Python package `wurld` (was `wurld-video`), module
-`import wurld`, CLI `wurld`. New files carry `WURLD*` Matroska tags and
-`"format": "wurld"`; every reader accepts the legacy `WURLD*` names and
-`"format": "wurld"` as permanent aliases, so pre-rename files read
-unchanged (covered by tests). Historical entries below keep their original
-release content with names modernized.
+The project takes its final name: **wurld** — *the World's Unbroken Record of
+Localization & Depth*. Python package `wurld`, module `import wurld`, CLI
+`wurld`; files carry `WURLD*` Matroska tags and `"format": "wurld"`. First
+release published to PyPI.
 
 ## 1.0.0 — 2026-08-06
 

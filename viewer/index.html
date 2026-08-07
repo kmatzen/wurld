@@ -132,9 +132,9 @@ function depthToMeters(u16, out) {
 // ---------- loading ----------
 function applyMetadata(tags, headline) {
   document.getElementById('drop').classList.add('hidden');
-  const docStr = tags.WURLD ?? tags.WURLD;
+  const docStr = tags.WURLD;
   const doc = typeof docStr === 'string' ? JSON.parse(docStr) : null;
-  const framesBuf = tags.WURLD_FRAMES ?? tags.WURLD_FRAMES;
+  const framesBuf = tags.WURLD_FRAMES;
   if (doc?.frames_binary && framesBuf instanceof Uint8Array) {
     doc.frames = unpackBinaryFrames(framesBuf, doc.frames_binary.cameras);
   }

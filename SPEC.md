@@ -48,12 +48,6 @@ elements regardless of position.
 
 Recommended file suffix: `.wl.webm` (plain `.webm` also valid).
 
-**Legacy tag names (pre-1.1).** The format was previously named *wurld*;
-files written before 1.1 carry `WURLD`, `WURLD_FRAMES`,
-`WURLD_POSES`, and `WURLD_IMU_<id>` tags, and a `"format": "wurld"`
-field. Readers MUST accept these as exact aliases of their `WURLD*` /
-`"wurld"` counterparts, forever. Writers MUST emit only the `WURLD*` names.
-
 ## 3. Canonical conventions (fixed in 1.0)
 
 | Aspect | Convention |
@@ -318,8 +312,6 @@ a remuxing finalizer MAY add one.
   ~100k frames).
 - Repeated SimpleTag names: binary payloads concatenate in file order; for string
   payloads the last occurrence wins.
-- Legacy `WURLD*` tag names and `"format": "wurld"` are read as exact
-  aliases (§2); this alias obligation is permanent.
 - A file with no `WURLD` tag is a plain chromapakz file; libraries SHOULD read it
   as a sequence with no poses.
 

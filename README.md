@@ -1,7 +1,6 @@
 # wurld
 
 > **wurld** — the *World's Unbroken Record of Localization & Depth*
-> (formerly "wurld"; renamed in 1.1.0 — old files read forever)
 **Posed sensor video in one playable WebM** — RGB video + per-frame camera pose +
 intrinsics + timestamps + bit-exact metric depth (and confidence / object IDs), in a
 single file that an ordinary video player treats as plain RGB.
