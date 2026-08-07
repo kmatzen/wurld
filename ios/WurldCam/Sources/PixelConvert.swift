@@ -48,10 +48,17 @@ final class PixelConverter {
         // `YCbCr420.make` tags the simulator buffer with matrix, colour space and
         // chroma siting — so the CV format builds straight from the buffer.
         let cvFmt = vImageCVImageFormat_CreateWithCVPixelBuffer(buffer).takeRetainedValue()
+        // Byte order R,G,B,A in memory: alpha-last *component* plus big-endian
+        // 32-bit words (default byte order on little-endian arm64 would store the
+        // word reversed, i.e. skip-first with R/B swapped). premultipliedLast on
+        // an opaque source leaves RGB untouched and sets A = 255, matching what
+        // the chromapakz encoder expects.
+        let bitmap = CGImageAlphaInfo.premultipliedLast.rawValue
+            | CGBitmapInfo.byteOrder32Big.rawValue
         var cgFmt = vImage_CGImageFormat(
             bitsPerComponent: 8, bitsPerPixel: 32,
             colorSpace: Unmanaged.passRetained(srgb),
-            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+            bitmapInfo: CGBitmapInfo(rawValue: bitmap),
             version: 0, decode: nil, renderingIntent: .defaultIntent)
 
         var full = vImage_Buffer()
