@@ -85,14 +85,17 @@ final class PixelConverter {
 
     private func buildConverter(for buffer: CVPixelBuffer) throws {
         let cvFmt = vImageCVImageFormat_CreateWithCVPixelBuffer(buffer).takeRetainedValue()
+        // The `_Get*` accessors take the const-typed handle; the `_Set*` take the
+        // mutable one.
+        let constFmt = cvFmt as! vImageConstCVImageFormat
         // A camera buffer carries its colour space; fall back to sRGB if untagged
         // so the converter always has a source gamut/transfer to map from.
-        if vImageCVImageFormat_GetColorSpace(cvFmt) == nil {
+        if vImageCVImageFormat_GetColorSpace(constFmt) == nil {
             vImageCVImageFormat_SetColorSpace(cvFmt, srgb)
         }
         // 4:2:0 needs a chroma siting to upsample; ARKit tags it, but an untagged
         // buffer (e.g. the simulator's) would fail converter creation without one.
-        if vImageCVImageFormat_GetChromaSiting(cvFmt) == nil {
+        if vImageCVImageFormat_GetChromaSiting(constFmt) == nil {
             vImageCVImageFormat_SetChromaSiting(cvFmt, kCVImageBufferChromaLocation_Center)
         }
         var cgFmt = vImage_CGImageFormat(
