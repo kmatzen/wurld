@@ -18,6 +18,7 @@ TAG_STRING = 0x4487
 TAG_BINARY = 0x4485
 CLUSTER = 0x1F43B675
 CLUSTER_TIMESTAMP = 0xE7
+VOID = 0xEC
 CUES = 0x1C53BB6B
 CUE_POINT = 0xBB
 CUE_TIME = 0xB3
@@ -276,8 +277,11 @@ def insert_header_tags(webm: bytes, tags: dict[str, str | bytes]) -> bytes:
     body_len = 0
     for eid, elem_start, pstart, pend in _top_level(webm, payload_start, payload_end):
         raw = webm[elem_start:pend]
-        if eid in (CUES, SEEK_HEAD):
-            continue  # rebuilt / replaced below
+        if eid in (CUES, SEEK_HEAD, VOID):
+            # Cues/SeekHead are rebuilt below. Void is reserved padding — some
+            # muxers (ffmpeg) leave one in the header, and carrying it forward
+            # would break the fixed-size SeekHead: its ID is one byte, not four.
+            continue
         if eid == CLUSTER:
             seen_cluster = True
             ts = 0

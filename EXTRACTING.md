@@ -77,14 +77,46 @@ Quaternion is `wxyz`, translation is metres, and the pose is **camera-to-world**
 with **RDF** camera axes (x right, y down, z forward — OpenCV/COLMAP). `t` is the
 sensor timestamp in seconds and may be non-uniform; do not assume `i / fps`.
 
-> **Limitation.** Files written by a streaming writer — anything recorded live,
-> including the iPhone app — and any file over ~10k frames store poses in a
-> compact binary tag (`WURLD_FRAMES`, 45 bytes per frame) instead of the JSON
-> array, and `ffprobe` does not print binary tags. `d["frames"]` will be empty.
-> The record layout is documented in [SPEC.md](SPEC.md) §7, but reading it needs
-> an EBML parser. Easiest zero-install route for those files: open them in the
+> **When `d["frames"]` is empty.** Files written by a streaming writer — anything
+> recorded live, including the iPhone app — and any file over ~10k frames store
+> poses in a compact binary tag (`WURLD_FRAMES`, 45 bytes per frame) instead of
+> the JSON array. ffmpeg's Matroska demuxer maps `TagString` into metadata and
+> **skips `TagBinary` entirely**, so those poses are invisible to it. Use the
+> pose track below, or open the file in the
 > [browser viewer](https://kmatzen.com/wurld/viewer/), which parses the binary
 > table client-side.
+
+## Poses as a subtitle track
+
+Files may also carry poses as a WebVTT track — the same approach GoPro (GPMF),
+MISB KLV and Apple's `mebx` take for per-frame metadata, because tags are for
+file-level data and tracks are for per-frame data. ffmpeg reads it directly:
+
+```sh
+ffmpeg -i "$F" -map 0:s:0 -c copy poses.vtt
+```
+
+```
+00:00.000 --> 00:00.033
+i=0 t=71877.482882 camera=0 q_wxyz=0.646373,0.636629,-0.321544,-0.271136 tr=-0.296528,0.285562,0.575724
+```
+
+Readable with no parser at all. Cue times are rebased to the video timeline
+because sensor clocks are absolute (ARKit hands out device uptime); the `t=`
+field carries the true timestamp and is authoritative.
+
+Add the track to a file that lacks one:
+
+```sh
+wurld pose-track in.wl.webm out.wl.webm      # needs ffmpeg on PATH
+```
+
+> **Do not do this by hand with `ffmpeg -i in.webm -i poses.vtt -c copy`.**
+> Because ffmpeg cannot see `TagBinary`, remuxing drops `WURLD_POSES` and
+> `WURLD_FRAMES` — a live-recorded file comes out the other side reading as
+> **zero poses**, with the data surviving only as subtitle text. `wurld
+> pose-track` remuxes, re-injects every original tag, and verifies the pose
+> count round-trips before it will write the output.
 
 ## RGB frames
 

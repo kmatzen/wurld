@@ -145,6 +145,120 @@ def _cmd_trim(args) -> int:
     return 0
 
 
+def _vtt_timestamp(seconds: float) -> str:
+    seconds = max(0.0, seconds)
+    h, rem = divmod(seconds, 3600.0)
+    m, s = divmod(rem, 60.0)
+    return f"{int(h):02d}:{int(m):02d}:{s:06.3f}"
+
+
+def _cmd_poses(args) -> int:
+    """Export poses as text, for readers that will not install anything.
+
+    ffmpeg cannot see the binary pose tables (its Matroska demuxer drops
+    TagBinary), so files written live or over ~10k frames are opaque to it.
+    This writes the same poses as WebVTT or CSV; the WebVTT form can be muxed
+    back in as a real subtitle track, which ffmpeg *can* read.
+    """
+    from . import container
+
+    seq = container.read(args.file)
+    frames = [f for f in seq.frames if f.pose_valid]
+    if not frames:
+        print(f"error: {args.file} carries no valid poses", file=sys.stderr)
+        return 1
+
+    fmt = args.format
+    if fmt is None:
+        fmt = "csv" if args.out and str(args.out).endswith(".csv") else "vtt"
+
+    out = open(args.out, "w") if args.out else sys.stdout
+    try:
+        if fmt == "csv":
+            print("i,t,qw,qx,qy,qz,tx,ty,tz,camera", file=out)
+            for f in frames:
+                q, tr = f.q_wxyz, f.tr
+                print(f"{f.i},{f.t!r},{q[0]!r},{q[1]!r},{q[2]!r},{q[3]!r},"
+                      f"{tr[0]!r},{tr[1]!r},{tr[2]!r},{f.camera}", file=out)
+        else:
+            # Cue times are rebased to the video timeline: sensor clocks are
+            # absolute (ARKit hands out device uptime), and a cue at 71877s
+            # would sit far past the end of the media. The true timestamp is
+            # kept in the cue text, which stays authoritative.
+            t0 = frames[0].t
+            print("WEBVTT", file=out)
+            print(f"NOTE wurld poses: camera_to_world, RDF axes, wxyz, metres, "
+                  f"t in seconds (absolute; cues rebased by {t0!r})", file=out)
+            for n, f in enumerate(frames):
+                nxt = frames[n + 1].t if n + 1 < len(frames) else f.t + 1.0 / 30.0
+                q, tr = f.q_wxyz, f.tr
+                print(file=out)
+                print(f"{_vtt_timestamp(f.t - t0)} --> {_vtt_timestamp(max(nxt - t0, f.t - t0 + 1e-3))}",
+                      file=out)
+                print(f"i={f.i} t={f.t!r} camera={f.camera} "
+                      f"q_wxyz={q[0]!r},{q[1]!r},{q[2]!r},{q[3]!r} "
+                      f"tr={tr[0]!r},{tr[1]!r},{tr[2]!r}", file=out)
+    finally:
+        if args.out:
+            out.close()
+    if args.out:
+        print(f"wrote {len(frames)} poses to {args.out}", file=sys.stderr)
+    return 0
+
+
+def _cmd_pose_track(args) -> int:
+    """Add a WebVTT pose track, preserving the tags ffmpeg would otherwise drop.
+
+    Remuxing through ffmpeg by hand is destructive here: its Matroska demuxer
+    never sees TagBinary, so a live-recorded file loses WURLD_POSES and
+    WURLD_FRAMES and reads back with zero poses. This exports the track, remuxes,
+    then re-injects every tag from the original and verifies the result before
+    writing it.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    from . import container, ebml
+
+    if shutil.which("ffmpeg") is None:
+        print("error: ffmpeg not found on PATH (needed to mux the track)", file=sys.stderr)
+        return 2
+
+    src = Path(args.file)
+    original = src.read_bytes()
+    tags = ebml.read_all_tags(original)
+    before = len(container.read(src).frames)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        vtt = Path(tmp) / "poses.vtt"
+        rc = _cmd_poses(argparse.Namespace(file=str(src), out=str(vtt), format="vtt"))
+        if rc != 0:
+            return rc
+        remuxed = Path(tmp) / "remuxed.webm"
+        proc = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(src), "-i", str(vtt),
+             "-map", "0", "-map", "1", "-c", "copy", "-c:s", "webvtt",
+             "-metadata:s:s:0", "title=wurld-poses", "-y", str(remuxed)],
+            capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f"error: ffmpeg failed: {proc.stderr.strip()[:400]}", file=sys.stderr)
+            return 1
+        # ffmpeg keeps TagString and silently drops TagBinary; put everything back.
+        out_bytes = ebml.insert_header_tags(remuxed.read_bytes(), tags)
+
+    Path(args.out).write_bytes(out_bytes)
+    after = len(container.read(args.out).frames)
+    if after != before:
+        print(f"error: pose count changed ({before} -> {after}); refusing to keep {args.out}",
+              file=sys.stderr)
+        Path(args.out).unlink(missing_ok=True)
+        return 1
+    print(f"wrote {args.out}: {after} poses intact, plus a readable pose track",
+          file=sys.stderr)
+    return 0
+
+
 def _cmd_demo(args) -> int:
     import chromapakz as cz
     import numpy as np
@@ -213,6 +327,20 @@ def main(argv=None) -> int:
     p_demo.add_argument("--height", type=int, default=360)
     p_demo.add_argument("--rgb-kbps", type=int, default=4000)
     p_demo.set_defaults(func=_cmd_demo)
+
+    p_poses = sub.add_parser(
+        "poses", help="export poses as WebVTT or CSV (readable without wurld)")
+    p_poses.add_argument("file")
+    p_poses.add_argument("-o", "--out", help="output path (default: stdout)")
+    p_poses.add_argument("--format", choices=["vtt", "csv"],
+                         help="default: csv if -o ends in .csv, else vtt")
+    p_poses.set_defaults(func=_cmd_poses)
+
+    p_pt = sub.add_parser(
+        "pose-track", help="copy a file, adding a WebVTT pose track ffmpeg can read")
+    p_pt.add_argument("file")
+    p_pt.add_argument("out")
+    p_pt.set_defaults(func=_cmd_pose_track)
 
     args = p.parse_args(argv)
     return args.func(args)
