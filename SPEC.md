@@ -1,4 +1,4 @@
-# Wurld — posed sensor video, v0.4 (working title)
+# Wurld — posed sensor video, v1.0
 
 Wurld is a container profile for **posed sensor video**: RGB video + per-frame
 camera pose + intrinsics + timestamps + bit-exact auxiliary signals (metric depth,
@@ -19,7 +19,7 @@ where, when, and what the numbers mean.
 2. **Canonical conventions, not declared conventions.** Every wurld file uses the
    same coordinate conventions (§3). Converters normalize *on write*. Consumers never
    branch on axis flags. The conventions block exists in the JSON for self-description
-   and versioning, but in v0.1 its values are fixed.
+   and versioning, but in 1.0 its values are fixed.
 3. **Bit-exact or honestly labeled.** Integer signals (raw sensor depth, IDs) round-trip
    bit-exactly via chromapakz lossless tracks. Value maps (§6) declare how integers map
    to physical quantities. Nothing is silently rescaled.
@@ -36,15 +36,17 @@ inside the Segment:
   - `TagName` (0x45A3) = `WURLD`
   - `TagString` (0x4487) = UTF-8 JSON document (§4)
 
-This mirrors chromapakz's own `CHROMAPAKZ` SimpleTag. Writers append the wurld
-`Tags` element at the **end of the Segment payload** (after all Clusters) and rewrite
-the Segment size vint; this preserves all Cue/Cluster offsets, which are relative to
-the Segment payload start. Readers scan top-level Segment children for Tags elements
-and select the SimpleTag named `WURLD`.
+This mirrors chromapakz's own `CHROMAPAKZ` SimpleTag. Element placement follows the
+streaming layout (§9): batch writers put wurld Tags in the header region before
+the first Cluster (rebuilding Cues for the shifted offsets); live recorders emit the
+header tag first and chunk tags between Clusters. Appending a Tags element after the
+Clusters (rewriting only the Segment size vint) also yields a valid file — early
+writers did — but forfeits streamable metadata. Readers scan all top-level Tags
+elements regardless of position.
 
 Recommended file suffix: `.wl.webm` (plain `.webm` also valid).
 
-## 3. Canonical conventions (fixed in v0.1)
+## 3. Canonical conventions (fixed in 1.0)
 
 | Aspect | Convention |
 |---|---|
@@ -64,7 +66,7 @@ xyzw quaternions) belong in libraries, not in files.
 ```json
 {
   "format": "wurld",
-  "version": "0.1",
+  "version": "1.0",
   "conventions": {
     "camera_axes": "RDF",
     "pose_direction": "camera_to_world",
@@ -112,7 +114,7 @@ Keyed by string camera id. `model` and `params` follow **COLMAP camera model nam
 | `OPENCV_FISHEYE` | `[fx, fy, cx, cy, k1, k2, k3, k4]` |
 
 `width`/`height` are the *calibrated* resolution and MUST equal the video track
-resolution in v0.1 (a `scale` extension is reserved for v0.2).
+resolution (a `scale` extension is reserved for a future revision).
 
 ### 4.2 `frames`
 
@@ -299,9 +301,12 @@ a remuxing finalizer MAY add one.
 
 - Unknown JSON fields and unknown `WURLD_*` tags MUST be ignored (forward
   compatibility).
-- `version` is `major.minor`; minor bumps are additive-only. v0.1 readers see v0.2+
-  files as valid (binary-frame files appear to have zero posed frames to a v0.1
-  reader — writers targeting maximum compatibility should prefer JSON frames below
+- `version` is `major.minor`; minor bumps are additive-only. **1.0 freezes the
+  semantics of every construct in this document**: any change to the meaning of
+  an existing field, tag, record layout, or convention requires a major bump;
+  1.x revisions may only add. Early readers see later files as valid
+  (binary-frame files appear to have zero posed frames to a pre-§7 reader —
+  writers targeting maximum compatibility should prefer JSON frames below
   ~100k frames).
 - Repeated SimpleTag names: binary payloads concatenate in file order; for string
   payloads the last occurrence wins.

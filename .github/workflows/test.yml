@@ -1,0 +1,52 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  python:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install ffmpeg (Stray importer tests)
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update && sudo apt-get install -y ffmpeg
+          else brew install ffmpeg; fi
+      - name: Install
+        run: pip install -e ".[dev,mcap,record3d]"
+      - name: Test
+        run: pytest tests -q
+
+  viewer-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: wurld.js parity checks
+        run: |
+          node --input-type=module -e "
+          import { packFrames, unpackFrames, buildTags, readWurldTags } from './viewer/wurld.js';
+          const frames = [
+            { i: 0, t: 1.5, camera: '0', q_wxyz: [0.5,0.5,0.5,0.5], tr: [1.25,-2.5,3.0] },
+            { i: 1, t: 2.5, pose_valid: false },
+          ];
+          const packed = packFrames(frames, ['0']);
+          if (packed.length !== 90) throw new Error('record size drift');
+          const back = unpackFrames(packed, ['0']);
+          if (back[0].t !== 1.5 || back[1].pose_valid !== false) throw new Error('roundtrip');
+          console.log('wurld.js pack/unpack OK');
+          "

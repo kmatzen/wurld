@@ -9,3 +9,5 @@ ios/WurldCam/WurldCam.xcodeproj/
 ios/WurldCam/build/
 ios/WurldCam/Vendor/
 ios/.native-build/
+dist/
+*.egg-info/

@@ -94,7 +94,17 @@ file playing in a plain `<video>` element.
 - Viewer verified in Chrome (native WebCodecs decode, no WASM), including binary
   frame tables.
 
-## v0.9 (current): bounded-memory iteration, trim, auto-lazy
+## 1.0
+
+SPEC declared **1.0** (frozen semantics; 1.x additions are additive-only, and
+§11 codifies file scope: one rig, one clock). chromapakz pinned to the released
+**0.4.0** — no more git installs. LICENSE (MIT), CHANGELOG, CI (Python 3.11/3.13
+on Linux+macOS plus a viewer parity job), and packaging validated (sdist+wheel
+build clean, twine-checked, fresh-venv install + CLI smoke). Multi-RGB pixel
+storage remains gated on the ChromaPakZ #47 design review; phone importers and
+WurldCam remain fixture/harness-validated pending a real capture.
+
+## v0.9: bounded-memory iteration, trim, auto-lazy
 
 - **`Sequence.iter_frames(start, stop)`**: memory-bounded streaming decode —
   one Cluster (~1 s) decoded at a time, so hour-long files iterate without
@@ -225,10 +235,7 @@ file playing in a plain `<video>` element.
 - **Python `wurld.stream.StreamReader`**: incremental parser for live/growing
   streams; batch `wl.read()` also accepts crash-truncated live files via chunk
   concatenation.
-- **Python live recording — `wurld.StreamWriter`** (needs chromapakz with
-  streaming encode, [ChromaPakZ #43](https://github.com/kmatzen/ChromaPakZ/pull/43);
-  `pip install "chromapakz @ git+https://github.com/kmatzen/chromapakz@main"` until
-  the next PyPI release):
+- **Python live recording — `wurld.StreamWriter`** (chromapakz ≥ 0.4.0):
 
   ```python
   w = wl.StreamWriter(out.write, cameras={"0": cam}, has_rgb=True,
