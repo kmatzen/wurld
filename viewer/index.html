@@ -228,8 +228,13 @@ async function loadRemote(src) {
   const tags = collectTagsInRange(headerBytes, bounds.payloadStart, firstCluster);
   const chroma = typeof tags.CHROMAPAKZ === 'string' ? JSON.parse(tags.CHROMAPAKZ) : {};
 
-  const lazy = new URLSearchParams(location.search).get('lazy') === '1'
-    && seeks[ID.CUES] && chroma.frames > 0;
+  // ?lazy=1 forces on, ?lazy=0 forces off; otherwise auto-enable for large
+  // files using the total size the probe's Content-Range already told us.
+  const total = parseInt((r.headers.get('Content-Range') ?? '').split('/')[1] ?? '0', 10);
+  const lazyParam = new URLSearchParams(location.search).get('lazy');
+  const AUTO_LAZY_BYTES = 32 * 1024 * 1024;
+  const wantLazy = lazyParam === '1' || (lazyParam !== '0' && total > AUTO_LAZY_BYTES);
+  const lazy = wantLazy && seeks[ID.CUES] && chroma.frames > 0;
   if (lazy) {
     applyMetadata(tags, `lazy: ${src} — poses from ${(fetched / 1024).toFixed(1)} KB; clusters fetch on demand`);
     return setupLazy(src, headerBytes, bounds, seeks, chroma, firstCluster);

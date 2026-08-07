@@ -281,6 +281,73 @@ class Sequence:
                 return s
         return None
 
+    def iter_frames(self, start: int = 0, stop: int | None = None):
+        """Yield ``(index, {"rgb": ..., "signals": {...}})`` with bounded memory.
+
+        Decodes one Cluster at a time (splice decode), so an hour-long file
+        never holds more than ~1 s of decoded frames. Requires the chromapakz
+        signal-keyframe cadence; files written before it fall back to a single
+        full decode (correct, but memory-unbounded — a warning is logged).
+        """
+        import logging
+
+        data = self._bytes
+        n = self.probe["frames"]
+        fps = self.probe["fps"]
+        stop = n if stop is None else min(stop, n)
+        if start >= stop:
+            return
+
+        seg_start, ps, pe = ebml._segment_bounds(data)
+        clusters = []  # (first_frame, elem_start, elem_end)
+        head_end = None
+        for eid, es, pstart, pend in ebml._top_level(data, ps, pe):
+            if eid == ebml.CLUSTER:
+                if head_end is None:
+                    head_end = es
+                ts = 0
+                for cid, cs, ce in ebml.iter_children(data, pstart, pend):
+                    if cid == ebml.CLUSTER_TIMESTAMP:
+                        ts = ebml._read_uint(data, cs, ce)
+                        break
+                clusters.append((round(ts * fps / 1000), es, pend))
+        if head_end is None:
+            return
+
+        independent = all(
+            all(ebml.cluster_first_block_keyframes(data[es:pend]).values())
+            for _, es, pend in clusters[1:]
+        )
+        if not independent:
+            logging.getLogger(__name__).warning(
+                "%s predates the chromapakz signal-keyframe cadence; "
+                "iter_frames falls back to one full decode", self.path
+            )
+            decoded = self._decode()
+            for i in range(start, stop):
+                yield i, {
+                    "rgb": np.asarray(decoded["rgb"][i]) if decoded.get("rgb") is not None else None,
+                    "signals": {sid: np.asarray(a[i]) for sid, a in decoded["signals"].items()},
+                }
+            return
+
+        head = data[ps:head_end]
+        for k, (first, es, pend) in enumerate(clusters):
+            last = (clusters[k + 1][0] if k + 1 < len(clusters) else n) - 1
+            if last < start or first >= stop:
+                continue
+            spliced = ebml.splice_file(data[:ps], seg_start, [head, data[es:pend]])
+            decoded = cz.decode(spliced)
+            count = last - first + 1
+            for local in range(count):
+                i = first + local
+                if not start <= i < stop:
+                    continue
+                yield i, {
+                    "rgb": np.asarray(decoded["rgb"][local]) if decoded.get("rgb") is not None else None,
+                    "signals": {sid: np.asarray(a[local]) for sid, a in decoded["signals"].items()},
+                }
+
     def fetch_frames(self, indices: list[int]) -> dict[int, dict]:
         """Decode only the Clusters containing ``indices`` (partial decode).
 

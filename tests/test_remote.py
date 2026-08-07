@@ -176,3 +176,40 @@ def test_sequence_fetch_frames_local_partial_decode(tmp_path):
     assert np.array_equal(got[3]["signals"]["depth"], full[3])
     assert np.array_equal(got[70]["signals"]["depth"], full[70])
     assert np.array_equal(got[70]["rgb"], np.asarray(seq.rgb[70]))
+
+
+def test_iter_frames_bounded_and_exact(tmp_path):
+    import chromapakz as cz
+    from wurld.synthetic import make_sequence
+
+    rgb, depth_m, cameras, frames = make_sequence(n_frames=90, width=96, height=72, fps=30)
+    d16 = cz.quantize_inverse(np.where(depth_m > 0, np.clip(depth_m, 0.5, 40.0), np.nan),
+                              near=0.5, far=40.0)
+    rgba = np.concatenate([rgb, np.full(rgb.shape[:3] + (1,), 255, np.uint8)], -1)
+    p = tmp_path / "seq.wl.webm"
+    wl.write(p, cameras=cameras, frames=frames, rgb=rgba,
+             signals={"depth": d16}, specs={"depth": cz.inverse_depth_spec(0.5, 40.0)})
+
+    seq = wl.read(p)
+    got = dict(seq.iter_frames(25, 65))  # spans clusters 0..2 partially
+    assert sorted(got) == list(range(25, 65))
+    full = seq.signal("depth")
+    for i in (25, 30, 59, 64):
+        assert np.array_equal(got[i]["signals"]["depth"], full[i])
+    assert np.array_equal(got[40]["rgb"], np.asarray(seq.rgb[40]))
+
+
+def test_cli_trim(tmp_path, capsys):
+    from wurld.cli import main
+
+    demo = tmp_path / "demo.wl.webm"
+    assert main(["demo", str(demo), "--frames", "90", "--width", "96", "--height", "72"]) == 0
+    out = tmp_path / "cut.wl.webm"
+    assert main(["trim", str(demo), str(out), "--frames", "30:60"]) == 0
+
+    src, cut = wl.read(demo), wl.read(out)
+    assert cut.probe["frames"] == 30 and len(cut.frames) == 30
+    assert cut.frames[0].i == 0 and cut.frames[0].t == src.frames[30].t
+    assert np.allclose(cut.c2w(5), src.c2w(35))
+    assert np.array_equal(cut.signal("depth"), src.signal("depth")[30:60])
+    assert "trimmed 30:60" in cut.world["description"]

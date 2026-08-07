@@ -80,6 +80,71 @@ def _cmd_extract(args) -> int:
     return 0
 
 
+def _cmd_trim(args) -> int:
+    import numpy as np
+
+    from . import container
+
+    try:
+        a, b = (int(v) if v else None for v in args.frames.split(":"))
+    except ValueError:
+        print("error: --frames must be START:STOP (e.g. 30:120)", file=sys.stderr)
+        return 2
+    seq = container.read(args.file)
+    a = a or 0
+    b = seq.probe["frames"] if b is None else b
+
+    rgb_frames, signal_frames = [], {}
+    for _, frame in seq.iter_frames(a, b):
+        if frame["rgb"] is not None:
+            rgb_frames.append(frame["rgb"])
+        for sid, arr in frame["signals"].items():
+            signal_frames.setdefault(sid, []).append(arr)
+    if not rgb_frames and not signal_frames:
+        print(f"error: no frames in range {a}:{b}", file=sys.stderr)
+        return 2
+
+    frames = [
+        container.Frame(i=f.i - a, t=f.t, camera=f.camera, q_wxyz=f.q_wxyz,
+                        tr=f.tr, pose_valid=f.pose_valid, params=f.params)
+        for f in seq.frames if a <= f.i < b
+    ]
+    # rebuild chromapakz encode specs from the source quantization
+    specs = {}
+    for sig in seq.probe.get("signals", []):
+        q = sig.get("quant") or {}
+        if q.get("type") == "inverse-depth":
+            specs[sig["id"]] = {"inverse_depth": True, "near": q["near"],
+                                "far": q["far"], "levels": q.get("levels", 65536)}
+    imu = []
+    if frames:
+        t0, t1 = frames[0].t, frames[-1].t
+        for stream_id, stream in seq.imu.items():
+            keep = stream.samples[(stream.samples[:, 0] >= t0) & (stream.samples[:, 0] <= t1)]
+            if keep.size:
+                imu.append(container.ImuStream(stream_id, keep, rate_hz=stream.rate_hz,
+                                               extrinsics=stream.extrinsics,
+                                               description=stream.description))
+
+    container.write(
+        args.out,
+        cameras=seq.cameras,
+        frames=frames,
+        rgb=np.stack(rgb_frames) if rgb_frames else None,
+        signals={sid: np.stack(v) for sid, v in signal_frames.items()} or None,
+        specs=specs or None,
+        signal_meta=seq.signals,
+        rigs=seq.rigs,
+        imu=imu or None,
+        fps=seq.probe["fps"],
+        world={**seq.world,
+               "description": f"{seq.world.get('description', '')} [trimmed {a}:{b} of "
+                              f"{seq.probe['frames']} frames]".strip()},
+    )
+    print(f"wrote {args.out} (frames {a}:{b}, {len(frames)} posed)")
+    return 0
+
+
 def _cmd_demo(args) -> int:
     import chromapakz as cz
     import numpy as np
@@ -134,6 +199,12 @@ def main(argv=None) -> int:
     p_ext.add_argument("out")
     p_ext.add_argument("--format", choices=["tum", "transforms", "colmap", "mcap"], required=True)
     p_ext.set_defaults(func=_cmd_extract)
+
+    p_trim = sub.add_parser("trim", help="cut a frame range into a new wurld file")
+    p_trim.add_argument("file")
+    p_trim.add_argument("out")
+    p_trim.add_argument("--frames", required=True, help="START:STOP frame range (STOP exclusive)")
+    p_trim.set_defaults(func=_cmd_trim)
 
     p_demo = sub.add_parser("demo", help="write a synthetic demo sequence")
     p_demo.add_argument("out", nargs="?", default="demo.wl.webm")

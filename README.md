@@ -94,7 +94,24 @@ file playing in a plain `<video>` element.
 - Viewer verified in Chrome (native WebCodecs decode, no WASM), including binary
   frame tables.
 
-## v0.8 (current): partial decode, EuRoC stereo+IMU, release plumbing
+## v0.9 (current): bounded-memory iteration, trim, auto-lazy
+
+- **`Sequence.iter_frames(start, stop)`**: memory-bounded streaming decode —
+  one Cluster (~1 s) decoded at a time, so hour-long files iterate without
+  holding the take in RAM. Pre-cadence files fall back to a full decode with a
+  logged warning.
+- **`wurld trim in out --frames 30:60`**: cut a range into a new file —
+  poses rebased, signals sliced bit-exactly, quantization specs preserved,
+  in-range IMU kept, provenance noted in the world description.
+- **Viewer auto-lazy**: the probe's `Content-Range` total switches large files
+  (>32 MB) to on-demand cluster scrubbing automatically; `?lazy=1|0` forces
+  either way.
+- **Multi-RGB design proposal** filed as
+  [ChromaPakZ #47](https://github.com/kmatzen/ChromaPakZ/issues/47) — the
+  schema/ABI sketch for true stereo pixel storage, awaiting maintainer review
+  before implementation.
+
+## v0.8: partial decode, EuRoC stereo+IMU, release plumbing
 
 - **`Sequence.fetch_frames(indices)`**: local partial decode — reading 3 frames
   of a 10k-frame file no longer decodes the other clusters (same cluster-splice
@@ -238,10 +255,10 @@ file playing in a plain `<video>` element.
   RUB→RDF pose conversion, honest RGB/depth resolution policy). *Validated against
   synthetic fixtures — a real capture to confirm conventions is welcome.*
 
-## Roadmap (v0.9+)
+## Roadmap (v1.0)
 
-Real-device validation: one WurldCam capture (either format) plus one
-Stray/Polycam/Record3D capture confirms every convention end to end; LeRobot
-depth-backend PR upstream (staged privately); merge ChromaPakZ #46 + publish the
-0.4.0 release, then pin `chromapakz>=0.4.0` here; SPEC v0.2 multi-track RGB
-(true stereo pixel storage) as the next format increment.
+Real-device validation (one WurldCam capture + one third-party-app capture
+confirms every convention); LeRobot depth-backend PR upstream (staged
+privately); ChromaPakZ #46 merge + 0.4.0 publish, then pin here; multi-RGB
+tracks per the #47 design once reviewed — at which point the EuRoC importer
+stores both cameras' pixels and SPEC binds frame camera ids to RGB streams.
