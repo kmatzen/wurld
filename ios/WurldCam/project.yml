@@ -1,0 +1,23 @@
+name: WurldCam
+options:
+  bundleIdPrefix: dev.wurld
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  WurldCam:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    info:
+      path: Sources/Info.plist
+      properties:
+        UILaunchScreen: {}
+        NSCameraUsageDescription: WurldCam records posed RGBD captures with the camera and LiDAR.
+        UIRequiredDeviceCapabilities: [arkit]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.wurld.WurldCam
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
