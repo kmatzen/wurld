@@ -49,6 +49,16 @@ do {
 }
 guard out.count == W * H * 4 else { fail("unexpected output size \(out.count)") }
 
+// Diagnostic: dump centre pixel (input vs output) for a few blocks so a channel
+// order / layout mismatch is visible in CI.
+for bi in [0, 1, 3, 5] {
+    let bxi = bi % cols, byi = bi / cols
+    let o = ((byi * bh + bh / 2) * W + (bxi * bw + bw / 2)) * 4
+    let inb = [rgba[o], rgba[o + 1], rgba[o + 2], rgba[o + 3]]
+    let ob = [out[o], out[o + 1], out[o + 2], out[o + 3]]
+    FileHandle.standardError.write(Data("PX b\(bi) in=\(inb) out=\(ob)\n".utf8))
+}
+
 // Compare block interiors (>=2px from block edges) to skip chroma bleed at seams.
 var maxErr = 0
 for y in 0..<H where (y % bh) >= 2 && (y % bh) < bh - 2 {

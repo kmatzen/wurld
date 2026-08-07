@@ -31,7 +31,9 @@ jobs:
   # capture path (ARKit) and the simulator sensor — against the vendored native
   # libs, which are cross-compiled from the public ChromaPakZ + libvpx.
   app-build:
-    runs-on: macos-14
+    # macos-15 ships Xcode 16, which can open the project format current
+    # XcodeGen emits (macos-14's Xcode 15 rejects it as "future format 77").
+    runs-on: macos-15
     env:
       # ChromaPakZ is pinned to the same release the rest of the repo depends on
       # (pyproject/package.json: >=0.5.0). Bump together.
