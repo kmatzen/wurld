@@ -76,6 +76,17 @@ non-functional. Put this in **App Review Notes** verbatim:
 > to record; the file is written to Documents and is retrievable via the share
 > button or the Files app.
 
+**"Apple Vision Pro support issue … [arkit]".** Expected, and not a rejection.
+visionOS has no `arkit` device capability, so this warning reports that the app
+will not be offered on Vision Pro as a compatible iPhone app — which is right:
+Vision Pro does not give compatible iPhone apps rear-camera LiDAR scene depth,
+so the app could only launch and report that depth is unavailable. Silence the
+notice in App Store Connect → Pricing and Availability → turn off Apple Vision
+Pro; there is no Info.plist key for it. Do **not** silence it by dropping
+`arkit` from `UIRequiredDeviceCapabilities` — that makes the app eligible for a
+platform it cannot work on. The key gates nothing else: at iOS 17 the oldest
+installable device is an A12 iPhone, and ARKit needs only A9.
+
 **Guideline 4.2 (minimum functionality).** This is a single-purpose developer
 tool: point, record, get a file. That is a legitimate category, but the listing
 should make the audience explicit — say who it is for (researchers, robotics
