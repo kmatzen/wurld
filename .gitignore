@@ -19,3 +19,6 @@ ios/.native-build/
 
 # npm pack output
 *.tgz
+
+# hosted demo sample is intentionally tracked
+!docs/samples/*.webm

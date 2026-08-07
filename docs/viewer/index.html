@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>wurld viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --edge: #2b3240; --text: #dbe2ea;
+    --dim: #8b96a5; --accent: #4ea1ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #app { display: grid; grid-template-columns: 1fr 340px; grid-template-rows: 1fr auto;
+    height: 100%; gap: 10px; padding: 10px; }
+  #gl { grid-row: 1; grid-column: 1; width: 100%; height: 100%; border-radius: 10px;
+    background: #05070a; border: 1px solid var(--edge); cursor: grab; }
+  #side { grid-row: 1; grid-column: 2; display: flex; flex-direction: column; gap: 10px;
+    overflow-y: auto; }
+  .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
+    padding: 10px; }
+  .card h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--dim); font-weight: 600; }
+  canvas.pane { width: 100%; border-radius: 6px; display: block; image-rendering: pixelated; }
+  video { width: 100%; border-radius: 6px; display: block; }
+  #bar { grid-row: 2; grid-column: 1 / 3; display: flex; align-items: center; gap: 12px; }
+  #scrub { flex: 1; accent-color: var(--accent); }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--edge);
+    border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 14px; }
+  button:hover { border-color: var(--accent); }
+  #meta { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px; color: var(--dim); max-height: 190px; overflow-y: auto; }
+  #drop { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(5,8,12,.92); z-index: 10; flex-direction: column; gap: 14px; }
+  #drop.hidden { display: none; }
+  #drop .big { font-size: 20px; color: var(--text); }
+  #drop .small { color: var(--dim); }
+  #frameinfo { font-variant-numeric: tabular-nums; color: var(--dim); min-width: 210px; }
+  a { color: var(--accent); }
+  .hint { color: var(--dim); font-size: 12px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="gl"></canvas>
+  <div id="side">
+    <div class="card"><h2>RGB</h2><canvas id="rgbPane" class="pane"></canvas></div>
+    <div class="card"><h2>Depth (metric)</h2><canvas id="depthPane" class="pane"></canvas></div>
+    <div class="card"><h2>Same file in &lt;video&gt;</h2><video id="vid" muted loop playsinline controls></video>
+      <div class="hint">A wurld file is an ordinary WebM — legacy players see plain RGB.</div></div>
+    <div class="card"><h2>Metadata</h2><div id="meta">–</div></div>
+  </div>
+  <div id="bar">
+    <button id="play">▶</button>
+    <input id="scrub" type="range" min="0" max="0" value="0" step="1">
+    <span id="frameinfo">–</span>
+    <button id="fit" title="Recenter the 3D view on this frame's geometry">Fit view</button>
+    <button id="open">Open file…</button>
+  </div>
+</div>
+<div id="drop">
+  <div class="big">wurld viewer</div>
+  <div class="small">Drop a <b>.wl.webm</b> file, or</div>
+  <button id="pick">Choose file</button>
+  <input id="file" type="file" accept=".webm" hidden>
+</div>
+
+<script type="module">
+import { createDecoder, dequantizeInverseDepth } from 'https://cdn.jsdelivr.net/npm/chromapakz@0.4.0/src/chromapakz.js';
+import { ID, readWurldTags, unpackFrames as unpackBinaryFrames, readSeekHead,
+         segmentBounds, segmentPayloadStart, collectTagsInRange, readCues, spliceFile }
+  from './wurld.js';
+
+// ---------- tiny mat4 ----------
+const M = {
+  mul(a, b) { const o = new Float64Array(16);
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+      let s = 0; for (let k = 0; k < 4; k++) s += a[r * 4 + k] * b[k * 4 + c];
+      o[r * 4 + c] = s; } return o; },
+  perspective(fovY, aspect, near, far) {
+    const f = 1 / Math.tan(fovY / 2), o = new Float64Array(16);
+    o[0] = f / aspect; o[5] = f; o[10] = (far + near) / (near - far);
+    o[11] = 2 * far * near / (near - far); o[14] = -1; return o; },
+  lookAt(eye, target, up) {
+    const z = norm3(sub3(eye, target));       // view -Z forward
+    const x = norm3(cross3(up, z)), y = cross3(z, x);
+    return new Float64Array([
+      x[0], x[1], x[2], -dot3(x, eye),
+      y[0], y[1], y[2], -dot3(y, eye),
+      z[0], z[1], z[2], -dot3(z, eye),
+      0, 0, 0, 1]); },
+  toGL(a) { const o = new Float32Array(16);   // row-major -> column-major
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) o[c * 4 + r] = a[r * 4 + c];
+    return o; },
+};
+const sub3 = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross3 = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm3 = a => { const l = Math.hypot(...a) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+function quatToMat(q) { // wxyz -> 3x3 row-major
+  const [w, x, y, z] = q;
+  return [
+    1-2*(y*y+z*z), 2*(x*y-w*z), 2*(x*z+w*y),
+    2*(x*y+w*z), 1-2*(x*x+z*z), 2*(y*z-w*x),
+    2*(x*z-w*y), 2*(y*z+w*x), 1-2*(x*x+y*y)];
+}
+
+// ---------- state ----------
+const state = {
+  doc: null, frames: [], // per video frame: {rgb: Uint8Array RGBA, depthU16, W, H}
+  poses: new Map(),      // frame index -> {c2w: 3x4 rows, t, camKey}
+  depthMap: null, camera: null,
+  cur: 0, playing: false, cloudCache: new Map(),
+  orbit: { az: -0.9, el: 0.55, dist: 9, target: [0, 0, 1] },
+  fps: 30,
+};
+
+function depthToMeters(u16, out) {
+  const vm = state.depthMap;
+  if (!vm) return null;
+  if (vm.type === 'inverse_depth') {
+    const f = dequantizeInverseDepth(u16, vm.near, vm.far, vm.levels ?? 65536);
+    return f; // Float32Array, NaN where invalid
+  }
+  const n = u16.length, o = out || new Float32Array(n);
+  const s = vm.scale ?? 1, off = vm.offset ?? 0, inv = vm.invalid;
+  for (let i = 0; i < n; i++) o[i] = u16[i] === inv ? NaN : u16[i] * s + off;
+  return o;
+}
+
+// ---------- loading ----------
+function applyMetadata(tags, headline) {
+  document.getElementById('drop').classList.add('hidden');
+  const docStr = tags.WURLD;
+  const doc = typeof docStr === 'string' ? JSON.parse(docStr) : null;
+  // Pose precedence (SPEC §9): consolidated WURLD_FRAMES table, else the
+  // concatenated WURLD_POSES chunks, else the JSON array. frames_binary is a
+  // descriptor, not a precondition — a streaming writer emits the table
+  // without one, and camera indices then resolve against sorted camera keys.
+  if (doc) {
+    const fb = doc.frames_binary;
+    const cameraKeys = fb?.cameras ?? Object.keys(doc.cameras ?? {}).sort();
+    const table = tags.WURLD_FRAMES, chunks = tags.WURLD_POSES;
+    if (table instanceof Uint8Array) doc.frames = unpackBinaryFrames(table, cameraKeys);
+    else if (chunks instanceof Uint8Array) doc.frames = unpackBinaryFrames(chunks, cameraKeys);
+  }
+  state.doc = doc;
+  state.poses = new Map(); state.cloudCache = new Map(); state.frames = [];
+  if (doc) {
+    for (const f of doc.frames || []) {
+      if (f.pose_valid === false) continue;
+      state.poses.set(f.i, { R: quatToMat(f.q_wxyz), t: f.tr, time: f.t, cam: f.camera ?? '0' });
+    }
+    const cams = doc.cameras || {};
+    state.camera = cams[Object.keys(cams)[0]] ?? null;
+    const depthSig = (doc.signals || []).find(s => s.role === 'depth');
+    state.depthMap = depthSig ? depthSig.value_map : null;
+  }
+  state.fps = doc?.frames?.length > 1
+    ? Math.max(1, 1 / ((doc.frames.at(-1).t - doc.frames[0].t) / (doc.frames.length - 1)))
+    : 30;
+  // Provisional framing from the trajectory; refined to the actual geometry as
+  // soon as a cloud exists (fitView). The trajectory alone is a poor target —
+  // a handheld take walks a metre while looking at a scene metres ahead, so
+  // centring on the path leaves the thing you want to look at off screen.
+  if (state.poses.size) {
+    let c = [0, 0, 0], k = 0, span = 1;
+    for (const p of state.poses.values()) { c = [c[0]+p.t[0], c[1]+p.t[1], c[2]+p.t[2]]; k++; }
+    c = c.map(v => v / k);
+    for (const p of state.poses.values())
+      span = Math.max(span, Math.hypot(p.t[0]-c[0], p.t[1]-c[1], p.t[2]-c[2]));
+    state.orbit.target = c; state.orbit.dist = span * 2.5;
+  }
+  state.fitted = false; state.userMoved = false;
+  showMeta(headline);
+  return doc;
+}
+
+function showMeta(headline) {
+  const doc = state.doc;
+  document.getElementById('meta').textContent = [
+    headline,
+    doc ? `wurld v${doc.version}; posed frames: ${state.poses.size}` : 'no WURLD tag (plain chromapakz)',
+    state.frames.length ? `video: ${state.W}x${state.H}, ${state.frames.length} frames decoded` : '',
+    state.camera ? `camera: ${state.camera.model} [${state.camera.params.map(v => +v.toFixed(2)).join(', ')}]` : '',
+    state.depthMap ? `depth map: ${JSON.stringify(state.depthMap)}` : 'no depth signal',
+    doc?.world ? `world: ${JSON.stringify(doc.world)}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function ingestFrame(frame) {
+  const wantedDepthId = (state.doc?.signals || []).find(s => s.role === 'depth')?.id;
+  const rec = { rgb: frame.rgb ?? null, depth: null };
+  if (frame.signals) {
+    const depthId = wantedDepthId ?? Object.keys(frame.signals)[0];
+    if (depthId && frame.signals[depthId]) rec.depth = frame.signals[depthId].u16;
+  }
+  state.frames.push(rec);
+  document.getElementById('scrub').max = Math.max(0, state.frames.length - 1);
+  if (state.frames.length === 1) setFrame(0);
+  else if (!state.playing) setFrame(state.cur);  // refresh the frame counter label
+}
+
+async function loadBytes(bytes, name) {
+  applyMetadata(readWurldTags(bytes), `file: ${name}  (${(bytes.length / 1e6).toFixed(2)} MB)`);
+  const dec = createDecoder(bytes);
+  state.W = dec.width; state.H = dec.height;
+  for await (const frame of dec) ingestFrame(frame);
+  const vid = document.getElementById('vid');
+  vid.src = URL.createObjectURL(new Blob([bytes], { type: 'video/webm' }));
+  vid.play().catch(() => {});
+  showMeta(`file: ${name}  (${(bytes.length / 1e6).toFixed(2)} MB)`);
+  setFrame(state.cur);
+}
+
+async function loadRemote(src) {
+  // Stage 1: ranged read of the head; SeekHead tells us the header extent (SPEC §9.1).
+  const PROBE = 8192;
+  const r = await fetch(src, { cache: 'no-store', headers: { Range: `bytes=0-${PROBE - 1}` } });
+  if (r.status !== 206) {  // no range support: fall back to a full download
+    const full = await fetch(src);
+    return loadBytes(new Uint8Array(await full.arrayBuffer()), src);
+  }
+  let head = new Uint8Array(await r.arrayBuffer());
+  const seeks = readSeekHead(head);
+  const firstCluster = seeks?.[ID.CLUSTER];
+  if (!firstCluster) {
+    const full = await fetch(src);
+    return loadBytes(new Uint8Array(await full.arrayBuffer()), src);
+  }
+  let fetched = head.length;
+  if (firstCluster > head.length) {
+    const r2 = await fetch(src, { cache: 'no-store', headers: { Range: `bytes=${head.length}-${firstCluster - 1}` } });
+    const more = new Uint8Array(await r2.arrayBuffer());
+    const joined = new Uint8Array(firstCluster);
+    joined.set(head); joined.set(more, head.length);
+    head = joined; fetched = head.length;
+  }
+  const headerBytes = head.subarray(0, firstCluster);
+  const bounds = segmentBounds(headerBytes);
+  const tags = collectTagsInRange(headerBytes, bounds.payloadStart, firstCluster);
+  const chroma = typeof tags.CHROMAPAKZ === 'string' ? JSON.parse(tags.CHROMAPAKZ) : {};
+
+  // ?lazy=1 forces on, ?lazy=0 forces off; otherwise auto-enable for large
+  // files using the total size the probe's Content-Range already told us.
+  const total = parseInt((r.headers.get('Content-Range') ?? '').split('/')[1] ?? '0', 10);
+  const lazyParam = new URLSearchParams(location.search).get('lazy');
+  const AUTO_LAZY_BYTES = 32 * 1024 * 1024;
+  const wantLazy = lazyParam === '1' || (lazyParam !== '0' && total > AUTO_LAZY_BYTES);
+  const lazy = wantLazy && seeks[ID.CUES] && chroma.frames > 0;
+  if (lazy) {
+    applyMetadata(tags, `lazy: ${src} — poses from ${(fetched / 1024).toFixed(1)} KB; clusters fetch on demand`);
+    return setupLazy(src, headerBytes, bounds, seeks, chroma, firstCluster);
+  }
+  applyMetadata(tags, `ranged: ${src} — all poses from ${(fetched / 1024).toFixed(1)} KB, streaming video…`);
+
+  // The <video> element streams independently via the server's own range support.
+  const vid = document.getElementById('vid');
+  vid.src = src;
+  vid.play().catch(() => {});
+
+  // Stage 2: stream the rest through the network decoder; frames appear as they arrive.
+  const dec = createDecoder();
+  dec.push(headerBytes);
+  state.W = 0; state.H = 0;
+  const stream = await fetch(src, { cache: 'no-store', headers: { Range: `bytes=${firstCluster}-` } });
+  const reader = stream.body.getReader();
+  (async () => {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      dec.push(value);
+    }
+    dec.finish();
+  })();
+  (async () => {
+    while (!dec.ready) await new Promise(res => setTimeout(res, 25));
+    state.W = dec.width; state.H = dec.height;
+    for (;;) {
+      const frame = await dec.readFrame();
+      if (!frame) break;
+      ingestFrame(frame);
+    }
+    showMeta(`ranged: ${src} — poses first (${(fetched / 1024).toFixed(1)} KB), then video streamed`);
+  })().catch(e => console.error('remote decode', e));
+}
+
+function camK(cam) {
+  const p = cam.params;
+  if (cam.model === 'SIMPLE_PINHOLE' || cam.model === 'SIMPLE_RADIAL' || cam.model === 'RADIAL')
+    return { fx: p[0], fy: p[0], cx: p[1], cy: p[2] };
+  return { fx: p[0], fy: p[1], cx: p[2], cy: p[3] };
+}
+
+// ---------- point cloud ----------
+const STRIDE = 2;
+function cloudForFrame(i) {
+  if (state.cloudCache.has(i)) return state.cloudCache.get(i);
+  const f = state.frames[i], pose = state.poses.get(i);
+  if (!f || !f.depth || !pose || !state.camera) return null;
+  const { fx, fy, cx, cy } = camK(state.camera);
+  const meters = depthToMeters(f.depth);
+  const { W, H } = state, R = pose.R, t = pose.t;
+  const maxPts = Math.ceil(W / STRIDE) * Math.ceil(H / STRIDE);
+  const pos = new Float32Array(maxPts * 3), col = new Float32Array(maxPts * 3);
+  let k = 0;
+  for (let v = 0; v < H; v += STRIDE) for (let u = 0; u < W; u += STRIDE) {
+    const z = meters[v * W + u];
+    if (!Number.isFinite(z)) continue;
+    const xc = (u - cx) / fx * z, yc = (v - cy) / fy * z;
+    pos[k*3]   = R[0]*xc + R[1]*yc + R[2]*z + t[0];
+    pos[k*3+1] = R[3]*xc + R[4]*yc + R[5]*z + t[1];
+    pos[k*3+2] = R[6]*xc + R[7]*yc + R[8]*z + t[2];
+    if (f.rgb) {
+      const o = (v * W + u) * 4;
+      col[k*3] = f.rgb[o] / 255; col[k*3+1] = f.rgb[o+1] / 255; col[k*3+2] = f.rgb[o+2] / 255;
+    } else col[k*3] = col[k*3+1] = col[k*3+2] = 0.8;
+    k++;
+  }
+  const cloud = { pos: pos.subarray(0, k * 3), col: col.subarray(0, k * 3), n: k };
+  if (state.cloudCache.size > 40) state.cloudCache.delete(state.cloudCache.keys().next().value);
+  state.cloudCache.set(i, cloud);
+  return cloud;
+}
+
+// Frame the orbit on what is actually drawn: the current cloud plus the
+// trajectory. Percentile bounds rather than min/max, so a handful of far
+// depth returns along a corridor don't push the scene into the distance.
+function fitView() {
+  const cloud = cloudForFrame(state.cur);
+  if (!cloud || !cloud.n) return false;
+  const lo = [], hi = [];
+  for (let ax = 0; ax < 3; ax++) {
+    const vals = new Float32Array(cloud.n);
+    for (let k = 0; k < cloud.n; k++) vals[k] = cloud.pos[k * 3 + ax];
+    vals.sort();
+    lo[ax] = vals[Math.floor(cloud.n * 0.02)];
+    hi[ax] = vals[Math.floor(cloud.n * 0.98)];
+  }
+  for (const p of state.poses.values())      // keep the camera path in frame
+    for (let ax = 0; ax < 3; ax++) { lo[ax] = Math.min(lo[ax], p.t[ax]); hi[ax] = Math.max(hi[ax], p.t[ax]); }
+  const extent = Math.max(0.4, Math.hypot(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]));
+  state.orbit.target = [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
+  state.orbit.dist = extent / (2 * Math.tan(25 * Math.PI / 180)) * 1.15;  // 50° vfov
+  return true;
+}
+
+// ---------- WebGL ----------
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2', { antialias: true });
+const VS = `#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aCol;
+uniform mat4 uMVP; uniform float uSize; out vec3 vCol;
+void main() { gl_Position = uMVP * vec4(aPos, 1.0);
+  gl_PointSize = clamp(uSize / gl_Position.w, 1.0, 6.0); vCol = aCol; }`;
+const FS = `#version 300 es
+precision mediump float; in vec3 vCol; out vec4 o;
+void main() { o = vec4(vCol, 1.0); }`;
+function makeProgram(vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+const prog = makeProgram(VS, FS);
+const uMVP = gl.getUniformLocation(prog, 'uMVP'), uSize = gl.getUniformLocation(prog, 'uSize');
+const posBuf = gl.createBuffer(), colBuf = gl.createBuffer();
+const lineBuf = gl.createBuffer(), lineColBuf = gl.createBuffer();
+
+function buildLines() {
+  // trajectory polyline + current frustum
+  const pts = [], cols = [];
+  const keys = [...state.poses.keys()].sort((a, b) => a - b);
+  for (let j = 1; j < keys.length; j++) {
+    const a = state.poses.get(keys[j-1]).t, b = state.poses.get(keys[j]).t;
+    pts.push(...a, ...b); cols.push(.35,.55,.9, .35,.55,.9);
+  }
+  const pose = state.poses.get(state.cur);
+  if (pose && state.camera) {
+    const { fx, fy, cx, cy } = camK(state.camera);
+    const { W, H } = state, d = state.orbit.dist * 0.08;
+    const corner = (u, v) => {
+      const xc = (u - cx) / fx * d, yc = (v - cy) / fy * d, R = pose.R, t = pose.t;
+      return [R[0]*xc + R[1]*yc + R[2]*d + t[0], R[3]*xc + R[4]*yc + R[5]*d + t[1], R[6]*xc + R[7]*yc + R[8]*d + t[2]];
+    };
+    const c = pose.t, tl = corner(0,0), tr = corner(W,0), br = corner(W,H), bl = corner(0,H);
+    for (const [a, b] of [[c,tl],[c,tr],[c,br],[c,bl],[tl,tr],[tr,br],[br,bl],[bl,tl]]) {
+      pts.push(...a, ...b); cols.push(1,.75,.25, 1,.75,.25);
+    }
+  }
+  return { pts: new Float32Array(pts), cols: new Float32Array(cols), n: pts.length / 3 };
+}
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth * dpr, h = canvas.clientHeight * dpr;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, w, h);
+  gl.clearColor(0.02, 0.03, 0.045, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+
+  if (!state.fitted && !state.userMoved && fitView()) state.fitted = true;
+
+  const { az, el, dist, target } = state.orbit;
+  const eye = [
+    target[0] + dist * Math.cos(el) * Math.cos(az),
+    target[1] + dist * Math.cos(el) * Math.sin(az),
+    target[2] + dist * Math.sin(el)];
+  const view = M.lookAt(eye, target, [0, 0, 1]);
+  const proj = M.perspective(50 * Math.PI / 180, w / h, 0.05, 1000);
+  const mvp = M.toGL(M.mul(proj, view));
+
+  gl.useProgram(prog);
+  gl.uniformMatrix4fv(uMVP, false, mvp);
+
+  const cloud = cloudForFrame(state.cur);
+  if (cloud && cloud.n) {
+    gl.uniform1f(uSize, canvas.height / 140);
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, cloud.pos, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, cloud.col, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.POINTS, 0, cloud.n);
+  }
+  const lines = buildLines();
+  if (lines.n) {
+    gl.uniform1f(uSize, 2);
+    gl.bindBuffer(gl.ARRAY_BUFFER, lineBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, lines.pts, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, lineColBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, lines.cols, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.LINES, 0, lines.n);
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+// ---------- 2D panes ----------
+function drawPanes(i) {
+  const f = state.frames[i]; if (!f) return;
+  const { W, H } = state;
+  const rp = document.getElementById('rgbPane'), dp = document.getElementById('depthPane');
+  if (f.rgb) {
+    rp.width = W; rp.height = H;
+    rp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(f.rgb), W, H), 0, 0);
+  }
+  if (f.depth) {
+    dp.width = W; dp.height = H;
+    const meters = depthToMeters(f.depth);
+    let lo = Infinity, hi = -Infinity;
+    for (const z of meters) if (Number.isFinite(z)) { if (z < lo) lo = z; if (z > hi) hi = z; }
+    const img = new ImageData(W, H), d = img.data;
+    for (let k = 0; k < meters.length; k++) {
+      const z = meters[k];
+      if (!Number.isFinite(z)) { d[k*4+3] = 255; continue; }
+      const x = (z - lo) / (hi - lo || 1);
+      // simple turbo-ish ramp
+      d[k*4]   = Math.round(255 * Math.min(1, Math.max(0, 1.6 - Math.abs(4*x - 3.2))));
+      d[k*4+1] = Math.round(255 * Math.min(1, Math.max(0, 1.6 - Math.abs(4*x - 1.9))));
+      d[k*4+2] = Math.round(255 * Math.min(1, Math.max(0, 1.6 - Math.abs(4*x - 0.7))));
+      d[k*4+3] = 255;
+    }
+    dp.getContext('2d').putImageData(img, 0, 0);
+  }
+}
+
+// ---------- lazy cluster access ----------
+const lazyState = { active: false };
+
+async function setupLazy(src, headerBytes, bounds, seeks, chroma, firstCluster) {
+  const cuesResp = await fetch(src, {
+    cache: 'no-store', headers: { Range: `bytes=${seeks[ID.CUES]}-${seeks[ID.CUES] + 65535}` },
+  });
+  const cues = readCues(new Uint8Array(await cuesResp.arrayBuffer()));
+  const fps = chroma.fps, n = chroma.frames;
+  Object.assign(lazyState, {
+    active: true, src, headerBytes, bounds, chroma,
+    cuesOffset: seeks[ID.CUES],
+    starts: cues.map(c => ({ frame: Math.round(c.timeMs * fps / 1000),
+                             offset: bounds.payloadStart + c.pos })),
+    loading: new Map(),  // cluster index -> Promise
+    requests: 2,         // head + cues so far
+  });
+  state.W = chroma.width; state.H = chroma.height;
+  state.frames = new Array(n).fill(null);
+  document.getElementById('scrub').max = n - 1;
+  const vid = document.getElementById('vid');
+  vid.src = src; vid.play().catch(() => {});
+  setFrame(0);
+}
+
+function lazyClusterOf(i) {
+  let k = 0;
+  lazyState.starts.forEach((s, j) => { if (s.frame <= i) k = j; });
+  return k;
+}
+
+async function ensureFrame(i) {
+  const k = lazyClusterOf(i);
+  if (!lazyState.loading.has(k)) {
+    lazyState.loading.set(k, (async () => {
+      const { src, headerBytes, bounds, starts, cuesOffset, chroma } = lazyState;
+      const start = starts[k].offset;
+      const end = (k + 1 < starts.length ? starts[k + 1].offset : cuesOffset) - 1;
+      const resp = await fetch(src, { cache: 'no-store', headers: { Range: `bytes=${start}-${end}` } });
+      lazyState.requests++;
+      const cluster = new Uint8Array(await resp.arrayBuffer());
+      const spliced = spliceFile(headerBytes, bounds.segStart,
+                                 [headerBytes.subarray(bounds.payloadStart), cluster]);
+      const dec = createDecoder(spliced);
+      const first = starts[k].frame;
+      const last = (k + 1 < starts.length ? starts[k + 1].frame : chroma.frames) - 1;
+      const wantedDepthId = (state.doc?.signals || []).find(s => s.role === 'depth')?.id;
+      let j = 0;
+      for (;;) {
+        const frame = await dec.readFrame();
+        if (!frame || first + j > last) break;
+        const rec = { rgb: frame.rgb ?? null, depth: null };
+        if (frame.signals) {
+          const depthId = wantedDepthId ?? Object.keys(frame.signals)[0];
+          if (depthId && frame.signals[depthId]) rec.depth = frame.signals[depthId].u16;
+        }
+        state.frames[first + j] = rec;
+        j++;
+      }
+      dec.close();
+    })());
+  }
+  await lazyState.loading.get(k);
+  showMeta(`lazy: ${lazyState.src} — ${lazyState.requests} ranged requests, ` +
+           `${state.frames.filter(Boolean).length}/${state.frames.length} frames cached`);
+}
+
+// ---------- frame control ----------
+function setFrame(i) {
+  state.cur = i;
+  document.getElementById('scrub').value = i;
+  const pose = state.poses.get(i);
+  const t = pose ? ` t=${pose.time.toFixed(3)}s` : '';
+  const missing = lazyState.active && !state.frames[i];
+  document.getElementById('frameinfo').textContent =
+    `frame ${i + 1}/${state.frames.length}${t}` + (missing ? ' (fetching…)' : '');
+  if (missing) {
+    ensureFrame(i).then(() => { if (state.cur === i) setFrame(i); })
+      .catch(e => console.error('ensureFrame', e));
+    return;
+  }
+  drawPanes(i);
+}
+// Playback follows each frame's own timestamp, not a uniform frame rate.
+// Real captures drop frames — an iPhone take can hold 30 fps for a while and
+// then stall for 300 ms — and stepping those frames at a constant rate turns
+// every stall into a teleport. Honouring t keeps motion at true speed and
+// renders a stall as a pause, which is what actually happened.
+let lastTick = 0, clockStart = 0, clockOffset = 0;
+function frameTime(i) { return state.poses.get(i)?.time; }
+function tick(ts) {
+  if (!state.playing) return;
+  const t0 = frameTime(0), tEnd = frameTime(state.frames.length - 1);
+  if (t0 != null && tEnd != null && tEnd > t0) {
+    const elapsed = clockOffset + (ts - clockStart) / 1000;
+    if (elapsed > tEnd - t0) {            // loop
+      clockStart = ts; clockOffset = 0; setFrame(0);
+    } else {
+      let i = state.cur;
+      while (i + 1 < state.frames.length) {
+        const tn = frameTime(i + 1);
+        if (tn == null || tn - t0 > elapsed) break;
+        i++;
+      }
+      if (i !== state.cur) setFrame(i);
+    }
+  } else if (ts - lastTick > 1000 / state.fps) {   // no timestamps: uniform fallback
+    lastTick = ts;
+    setFrame((state.cur + 1) % state.frames.length);
+  }
+  requestAnimationFrame(tick);
+}
+function resyncClock(ts) {
+  clockStart = ts;
+  const t0 = frameTime(0), tc = frameTime(state.cur);
+  clockOffset = t0 != null && tc != null ? tc - t0 : 0;
+}
+document.getElementById('play').onclick = () => {
+  state.playing = !state.playing;
+  document.getElementById('play').textContent = state.playing ? '⏸' : '▶';
+  if (state.playing) { resyncClock(performance.now()); requestAnimationFrame(tick); }
+};
+document.getElementById('scrub').oninput = e => { state.playing = false;
+  document.getElementById('play').textContent = '▶'; setFrame(+e.target.value); };
+document.getElementById('fit').onclick = () => { state.userMoved = false; fitView(); };
+
+// ---------- input ----------
+let dragging = false, panning = false, lx = 0, ly = 0;
+canvas.addEventListener('pointerdown', e => {
+  dragging = true; panning = e.button === 2 || e.shiftKey; lx = e.clientX; ly = e.clientY;
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointerup', () => dragging = false);
+canvas.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
+  const o = state.orbit;
+  state.userMoved = true;   // never yank the view back once it is theirs
+  if (panning) {
+    const s = o.dist / 600;
+    const right = [Math.sin(o.az), -Math.cos(o.az), 0];
+    o.target[0] -= right[0] * dx * s; o.target[1] -= right[1] * dx * s; o.target[2] += dy * s;
+  } else {
+    o.az -= dx * 0.007; o.el = Math.min(1.5, Math.max(-1.5, o.el + dy * 0.007));
+  }
+});
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  state.userMoved = true;
+  state.orbit.dist = Math.min(500, Math.max(0.3, state.orbit.dist * Math.exp(e.deltaY * 0.001)));
+}, { passive: false });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ---------- file handling ----------
+const fileInput = document.getElementById('file');
+document.getElementById('pick').onclick = () => fileInput.click();
+document.getElementById('open').onclick = () => fileInput.click();
+fileInput.onchange = async () => {
+  const f = fileInput.files[0];
+  if (f) loadBytes(new Uint8Array(await f.arrayBuffer()), f.name);
+};
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', async e => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) loadBytes(new Uint8Array(await f.arrayBuffer()), f.name);
+});
+
+// ?src= auto-load (relative to this page): ranged/progressive when the server
+// supports it and the file has a SeekHead; full download otherwise.
+const src = new URLSearchParams(location.search).get('src');
+if (src) loadRemote(src).catch(e => console.error('load', e));
+</script>
+</body>
+</html>

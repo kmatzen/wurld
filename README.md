@@ -103,6 +103,25 @@ Zero-install, WebCodecs-decoded: seekable playback with per-frame point-cloud
 reprojection, camera trajectory + frustum, RGB and metric-depth panes, and the same
 file playing in a plain `<video>` element.
 
+Hosted, with a sample loaded — nothing to clone or install:
+**[kmatzen.com/wurld](https://kmatzen.com/wurld/)**
+
+## No install at all
+
+The metadata lives in standard Matroska tags, so standard tools read it.
+`ffprobe` prints the whole document — cameras, conventions, signal semantics,
+and (for batch-written files) every pose:
+
+```sh
+ffprobe -v error -show_entries format_tags=WURLD -of default=nw=1:nk=1 scene.wl.webm
+```
+
+[EXTRACTING.md](EXTRACTING.md) is the cookbook: poses to CSV, intrinsics, RGB
+frames, and depth in metres using nothing but ffmpeg and arithmetic — including
+the exact triangle-fold and inverse-depth formulas, checked against the
+reference reader to 1.5 µm. It is also honest about the two things that route
+does not reach (binary pose tables and IMU streams) and what to do instead.
+
 ## Layout
 
 - `SPEC.md` — the format (v0.1)

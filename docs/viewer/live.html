@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>wurld live</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --edge:#2b3240; --text:#dbe2ea; --dim:#8b96a5; --accent:#4ea1ff; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font:14px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif; }
+  #app { display:grid; grid-template-columns:1fr 320px; grid-template-rows:auto 1fr; gap:10px; padding:10px; height:100%; }
+  h1 { grid-column:1/3; margin:0; font-size:15px; font-weight:600; }
+  h1 .sub { color:var(--dim); font-weight:400; }
+  #gl { grid-row:2; grid-column:1; width:100%; height:100%; border-radius:10px; background:#05070a; border:1px solid var(--edge); }
+  #side { grid-row:2; grid-column:2; display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--panel); border:1px solid var(--edge); border-radius:10px; padding:10px; }
+  .card h2 { margin:0 0 8px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
+  canvas.pane { width:100%; border-radius:6px; image-rendering:pixelated; display:block; }
+  button { background:var(--panel); color:var(--text); border:1px solid var(--edge); border-radius:8px;
+    padding:8px 16px; cursor:pointer; font-size:14px; }
+  button:hover { border-color:var(--accent); }
+  button:disabled { opacity:.4; cursor:default; }
+  #stats { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--dim); white-space:pre-line; }
+  #verdict { font-family:ui-monospace,Menlo,monospace; font-size:12px; white-space:pre-line; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>wurld live &nbsp;<span class="sub">record → stream → play, all in this page; the player sees only the byte stream</span></h1>
+  <canvas id="gl"></canvas>
+  <div id="side">
+    <div class="card">
+      <button id="start">● Start recording</button>
+      <button id="stop" disabled>■ Stop</button>
+    </div>
+    <div class="card"><h2>Recorder (source of truth)</h2><canvas id="rec" class="pane"></canvas></div>
+    <div class="card"><h2>Stream stats</h2><div id="stats">idle</div></div>
+    <div class="card"><h2>Finalized file</h2><div id="verdict">–</div></div>
+  </div>
+</div>
+
+<script type="module">
+import { createDecoder, createEncoder } from 'https://cdn.jsdelivr.net/npm/chromapakz@0.4.0/src/chromapakz.js';
+import { WurldRecorder, WurldLivePlayer, readWurldTags, unpackFrames, cat }
+  from './wurld.js';
+
+const W = 160, H = 120, NEAR = 0.5, FAR = 40;
+// fps sets the keyframe (and therefore cluster/pose-chunk) cadence: one flush per second
+// of media time. 10 keeps the live loop visibly flowing at lossless-encode speeds.
+const FPS = 10;
+const FX = 0.75 * W, FY = 0.75 * W, CX = (W - 1) / 2, CY = (H - 1) / 2;
+
+// ---------- synthetic scene (same sphere + checker plane as the Python demo) ----------
+function lookAtC2W(eye, target) {
+  const sub = (a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+  const norm = a=>{const l=Math.hypot(...a)||1; return a.map(v=>v/l);};
+  const cross = (a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const fwd = norm(sub(target, eye));
+  const right = norm(cross(fwd, [0,0,1]));
+  const down = cross(fwd, right);
+  return { right, down, fwd, eye };
+}
+function renderFrame(cam) {
+  const rgb = new Uint8Array(W*H*4), depth = new Float32Array(W*H);
+  const { right, down, fwd, eye } = cam;
+  for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
+    const dx = (u-CX)/FX, dy = (v-CY)/FY;
+    const d = [ right[0]*dx + down[0]*dy + fwd[0],
+                right[1]*dx + down[1]*dy + fwd[1],
+                right[2]*dx + down[2]*dy + fwd[2] ];
+    let t = Infinity, r=13, g=18, b=31;
+    // sphere at (0,0,1) r=1
+    const oc = [eye[0], eye[1], eye[2]-1];
+    const A = d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+    const B = 2*(d[0]*oc[0]+d[1]*oc[1]+d[2]*oc[2]);
+    const C = oc[0]*oc[0]+oc[1]*oc[1]+oc[2]*oc[2]-1;
+    const disc = B*B-4*A*C;
+    if (disc > 0) {
+      const ts = (-B - Math.sqrt(disc)) / (2*A);
+      if (ts > 1e-6) {
+        t = ts;
+        const p = [eye[0]+d[0]*ts, eye[1]+d[1]*ts, eye[2]+d[2]*ts];
+        const n = [p[0], p[1], p[2]-1];
+        const sh = Math.max(0, Math.min(1, n[0]*0.5 + n[1]*0.3 + n[2]*0.8));
+        r = 230*(0.25+0.75*sh); g = 115*(0.25+0.75*sh); b = 51*(0.25+0.75*sh);
+      }
+    }
+    // plane z=0 checker
+    if (Math.abs(d[2]) > 1e-9) {
+      const tp = -eye[2]/d[2];
+      if (tp > 1e-6 && tp < t) {
+        t = tp;
+        const px = eye[0]+d[0]*tp, py = eye[1]+d[1]*tp;
+        const ck = ((Math.floor(px)+Math.floor(py)) % 2 + 2) % 2;
+        const fade = 1/(1+0.02*tp*tp);
+        if (ck) { r=217*fade; g=217*fade; b=230*fade; } else { r=51*fade; g=64*fade; b=89*fade; }
+      }
+    }
+    const k = v*W+u;
+    depth[k] = Number.isFinite(t) ? Math.min(Math.max(t, NEAR), FAR) : NaN;
+    rgb[k*4]=r; rgb[k*4+1]=g; rgb[k*4+2]=b; rgb[k*4+3]=255;
+  }
+  return { rgb, depth };
+}
+function poseOf(i) {
+  const a = 2*Math.PI*i/120;
+  const eye = [3.2*Math.cos(a), 3.2*Math.sin(a), 1.6+0.4*Math.sin(2*a)];
+  const cam = lookAtC2W(eye, [0,0,0.8]);
+  // RDF c2w -> quaternion (wxyz)
+  const m = [cam.right[0],cam.down[0],cam.fwd[0], cam.right[1],cam.down[1],cam.fwd[1], cam.right[2],cam.down[2],cam.fwd[2]];
+  const tr = m[0]+m[4]+m[8];
+  let q;
+  if (tr > 0) { const s = Math.sqrt(tr+1)*2;
+    q = [0.25*s, (m[7]-m[5])/s, (m[2]-m[6])/s, (m[3]-m[1])/s];
+  } else {
+    const i0 = m[0] > m[4] ? (m[0] > m[8] ? 0 : 2) : (m[4] > m[8] ? 1 : 2);
+    const j0=(i0+1)%3, k0=(i0+2)%3, M=(r,c)=>m[r*3+c];
+    const s = Math.sqrt(M(i0,i0)-M(j0,j0)-M(k0,k0)+1)*2;
+    q = [0,0,0,0]; q[0]=(M(k0,j0)-M(j0,k0))/s; q[1+i0]=0.25*s;
+    q[1+j0]=(M(j0,i0)+M(i0,j0))/s; q[1+k0]=(M(k0,i0)+M(i0,k0))/s;
+  }
+  const n = Math.hypot(...q); q = q.map(v=>v/n); if (q[0]<0) q=q.map(v=>-v);
+  return { cam, pose: { q_wxyz: q, tr: cam.eye } };
+}
+
+// ---------- WebGL (point cloud + trajectory) ----------
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2');
+const prog = (() => {
+  const vs = `#version 300 es
+    layout(location=0) in vec3 aPos; layout(location=1) in vec3 aCol;
+    uniform mat4 uMVP; out vec3 vCol;
+    void main(){ gl_Position=uMVP*vec4(aPos,1.0); gl_PointSize=clamp(160.0/gl_Position.w,1.0,5.0); vCol=aCol; }`;
+  const fs = `#version 300 es
+    precision mediump float; in vec3 vCol; out vec4 o; void main(){ o=vec4(vCol,1.0); }`;
+  const p = gl.createProgram();
+  for (const [ty, src] of [[gl.VERTEX_SHADER, vs],[gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(ty); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+  }
+  gl.linkProgram(p); return p;
+})();
+const uMVP = gl.getUniformLocation(prog, 'uMVP');
+const posBuf = gl.createBuffer(), colBuf = gl.createBuffer(), trajBuf = gl.createBuffer(), trajColBuf = gl.createBuffer();
+let cloud = null, traj = new Float32Array(0);
+
+function draw(ts) {
+  const dpr = devicePixelRatio || 1;
+  const w = canvas.clientWidth*dpr, h = canvas.clientHeight*dpr;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  gl.viewport(0,0,w,h); gl.clearColor(0.02,0.03,0.045,1);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT); gl.enable(gl.DEPTH_TEST);
+  const az = ts*0.0002, el = 0.5, dist = 9, tg = [0,0,1];
+  const eye = [tg[0]+dist*Math.cos(el)*Math.cos(az), tg[1]+dist*Math.cos(el)*Math.sin(az), tg[2]+dist*Math.sin(el)];
+  const fwd = norm3([tg[0]-eye[0],tg[1]-eye[1],tg[2]-eye[2]]);
+  const right = norm3(cross3(fwd,[0,0,1])), up = cross3(right,fwd);
+  const f = 1/Math.tan(25*Math.PI/180), aspect = w/h, near=0.05, far=1000;
+  const view = (p)=>{ const x=p[0]-eye[0],y=p[1]-eye[1],z=p[2]-eye[2];
+    return [x*right[0]+y*right[1]+z*right[2], x*up[0]+y*up[1]+z*up[2], -(x*fwd[0]+y*fwd[1]+z*fwd[2])]; };
+  // build column-major MVP
+  const R=[right,up,[-fwd[0],-fwd[1],-fwd[2]]];
+  const mv=new Float32Array(16);
+  for(let c=0;c<3;c++){ mv[c*4]=R[0][c]; mv[c*4+1]=R[1][c]; mv[c*4+2]=R[2][c]; }
+  mv[12]=-(R[0][0]*eye[0]+R[0][1]*eye[1]+R[0][2]*eye[2]);
+  mv[13]=-(R[1][0]*eye[0]+R[1][1]*eye[1]+R[1][2]*eye[2]);
+  mv[14]=-(R[2][0]*eye[0]+R[2][1]*eye[1]+R[2][2]*eye[2]);
+  mv[15]=1;
+  const pr=new Float32Array(16);
+  pr[0]=f/aspect; pr[5]=f; pr[10]=(far+near)/(near-far); pr[11]=-1; pr[14]=2*far*near/(near-far);
+  const mvp=new Float32Array(16);
+  for(let c2=0;c2<4;c2++) for(let r2=0;r2<4;r2++){ let s=0; for(let k=0;k<4;k++) s+=pr[k*4+r2]*mv[c2*4+k]; mvp[c2*4+r2]=s; }
+  gl.useProgram(prog); gl.uniformMatrix4fv(uMVP,false,mvp);
+  if (cloud) {
+    gl.bindBuffer(gl.ARRAY_BUFFER,posBuf); gl.bufferData(gl.ARRAY_BUFFER,cloud.pos,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,colBuf); gl.bufferData(gl.ARRAY_BUFFER,cloud.col,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1,3,gl.FLOAT,false,0,0);
+    gl.drawArrays(gl.POINTS,0,cloud.n);
+  }
+  if (traj.length >= 6) {
+    gl.bindBuffer(gl.ARRAY_BUFFER,trajBuf); gl.bufferData(gl.ARRAY_BUFFER,traj,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);
+    const cols = new Float32Array(traj.length); for(let i=0;i<cols.length;i+=3){cols[i]=.35;cols[i+1]=.55;cols[i+2]=.9;}
+    gl.bindBuffer(gl.ARRAY_BUFFER,trajColBuf); gl.bufferData(gl.ARRAY_BUFFER,cols,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1,3,gl.FLOAT,false,0,0);
+    gl.drawArrays(gl.LINE_STRIP,0,traj.length/3);
+  }
+  requestAnimationFrame(draw);
+}
+const norm3 = a=>{const l=Math.hypot(...a)||1; return [a[0]/l,a[1]/l,a[2]/l];};
+const cross3 = (a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+requestAnimationFrame(draw);
+
+// ---------- live pipeline ----------
+const stats = { recFrames:0, chunks:0, bytes:0, posesRx:0, framesRx:0 };
+const statsEl = document.getElementById('stats');
+function showStats() {
+  statsEl.textContent =
+    `recorded frames   ${stats.recFrames}\n` +
+    `stream chunks     ${stats.chunks}\n` +
+    `stream bytes      ${(stats.bytes/1024).toFixed(1)} KB\n` +
+    `player poses      ${stats.posesRx}\n` +
+    `player frames     ${stats.framesRx}`;
+}
+
+let running = false;
+document.getElementById('start').onclick = async () => {
+  document.getElementById('start').disabled = true;
+  document.getElementById('stop').disabled = false;
+  running = true;
+  Object.keys(stats).forEach(k => stats[k] = 0);
+  const fileParts = [];
+
+  // ---- player side: sees only bytes ----
+  const netDec = createDecoder();  // network decoder
+  const poseByIndex = new Map();
+  const player = new WurldLivePlayer({
+    sink: b => netDec.push(b),
+    onPoses: fs => { for (const f of fs) poseByIndex.set(f.i, f); stats.posesRx = poseByIndex.size; },
+  });
+
+  const decoded = [];
+  (async () => {
+    while (!netDec.ready) await new Promise(r => setTimeout(r, 25));
+    for (;;) {
+      const frame = await netDec.readFrame();
+      if (!frame) break;
+      const idx = decoded.length;
+      decoded.push(frame);
+      stats.framesRx = decoded.length;
+      const pose = poseByIndex.get(idx);
+      const depth = frame.signals?.depth?.float;
+      if (pose && depth && frame.rgb) {
+        // rebuild point cloud from *streamed* data only
+        const R = quatToMat(pose.q_wxyz), t = pose.tr;
+        const pos = [], col = [];
+        for (let v = 0; v < H; v += 2) for (let u = 0; u < W; u += 2) {
+          const z = depth[v*W+u];
+          if (!Number.isFinite(z)) continue;
+          const xc = (u-CX)/FX*z, yc = (v-CY)/FY*z;
+          pos.push(R[0]*xc+R[1]*yc+R[2]*z+t[0], R[3]*xc+R[4]*yc+R[5]*z+t[1], R[6]*xc+R[7]*yc+R[8]*z+t[2]);
+          const o = (v*W+u)*4;
+          col.push(frame.rgb[o]/255, frame.rgb[o+1]/255, frame.rgb[o+2]/255);
+        }
+        cloud = { pos: new Float32Array(pos), col: new Float32Array(col), n: pos.length/3 };
+        const tj = [];
+        [...poseByIndex.keys()].sort((a,b)=>a-b).forEach(k => tj.push(...poseByIndex.get(k).tr));
+        traj = new Float32Array(tj);
+      }
+      showStats();
+    }
+  })().catch(e => { statsEl.textContent += `\nplayer error: ${e.message}`; console.error(e); });
+
+  // ---- recorder side ----
+  const doc = {
+    format: 'wurld', version: '0.3',
+    conventions: { camera_axes:'RDF', pose_direction:'camera_to_world',
+                   quaternion_order:'wxyz', units:'meters', timestamp_units:'seconds' },
+    world: { metric_scale: true, gravity_in_world: [0,0,-1], description: 'live browser recording' },
+    cameras: { '0': { model:'PINHOLE', width: W, height: H, params: [FX, FY, CX, CY] } },
+    signals: [ { id:'depth', role:'depth',
+                 value_map:{ type:'inverse_depth', near:NEAR, far:FAR, levels:65536, invalid:0 } } ],
+    frames: [],
+  };
+  const recorder = new WurldRecorder({
+    doc,
+    onChunk: c => {
+      stats.chunks++; stats.bytes += c.length;
+      fileParts.push(c);
+      player.feed(c);          // the "network"
+      showStats();
+    },
+    makeEncoder: onChunk => createEncoder({
+      W, H, fps: FPS, hasRgb: true, onChunk,
+      signals: [{ id: 'depth', near: NEAR, far: FAR }],
+    }),
+  });
+
+  const recCanvas = document.getElementById('rec');
+  recCanvas.width = W; recCanvas.height = H;
+  const rctx = recCanvas.getContext('2d');
+
+  for (let i = 0; running; i++) {
+    const { pose } = poseOf(i);
+    const { rgb, depth } = renderFrame(poseOf(i).cam);
+    rctx.putImageData(new ImageData(new Uint8ClampedArray(rgb), W, H), 0, 0);
+    await recorder.addFrame(
+      { rgb, signals: { depth: { float: depth } } },
+      { i, t: i / FPS, camera: '0', ...pose },
+    );
+    stats.recFrames = i + 1;
+    showStats();
+    await new Promise(r => setTimeout(r, 5));
+  }
+
+  await recorder.finish();
+  netDec.finish();
+
+  // ---- validate the finalized file (buffered path, like the main viewer) ----
+  const file = cat(fileParts);
+  const tags = readWurldTags(file);
+  const fdoc = JSON.parse(tags.WURLD);
+  const table = tags.WURLD_FRAMES;
+  const keys = Object.keys(fdoc.cameras).sort();
+  const frames = table ? unpackFrames(table, keys) : [];
+  let bufFrames = 0, bufOk = false;
+  try {
+    const bd = createDecoder(file);
+    for (;;) { const f = await bd.readFrame(); if (!f) break; bufFrames++; }
+    bufOk = true;
+  } catch (e) { console.error('buffered decode failed', e); }
+  const blob = new Blob([file], { type: 'video/webm' });
+  document.getElementById('verdict').innerHTML =
+    `file size        ${(file.length/1024).toFixed(1)} KB\n` +
+    `poses in table   ${frames.length}\n` +
+    `buffered decode  ${bufOk ? '✓' : '✗'} ${bufFrames} frames\n` +
+    `<a download="live.wl.webm" href="${URL.createObjectURL(blob)}">download live.wl.webm</a>`;
+};
+
+document.getElementById('stop').onclick = () => {
+  running = false;
+  document.getElementById('stop').disabled = true;
+  document.getElementById('start').disabled = false;
+};
+
+function quatToMat(q) {
+  const [w,x,y,z] = q;
+  return [1-2*(y*y+z*z), 2*(x*y-w*z), 2*(x*z+w*y),
+          2*(x*y+w*z), 1-2*(x*x+z*z), 2*(y*z-w*x),
+          2*(x*z-w*y), 2*(y*z+w*x), 1-2*(x*x+y*y)];
+}
+</script>
+</body>
+</html>
