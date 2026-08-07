@@ -84,20 +84,11 @@ final class PixelConverter {
     }
 
     private func buildConverter(for buffer: CVPixelBuffer) throws {
+        // Both sources are fully colour-tagged — ARKit tags the camera frame, and
+        // `YCbCr420.make` tags the simulator buffer with matrix, colour space and
+        // chroma siting — so the CV format builds straight from the buffer with no
+        // accessor/mutation dance (and no fragile const-handle cast).
         let cvFmt = vImageCVImageFormat_CreateWithCVPixelBuffer(buffer).takeRetainedValue()
-        // The `_Get*` accessors take the const-typed handle; the `_Set*` take the
-        // mutable one.
-        let constFmt = cvFmt as! vImageConstCVImageFormat
-        // A camera buffer carries its colour space; fall back to sRGB if untagged
-        // so the converter always has a source gamut/transfer to map from.
-        if vImageCVImageFormat_GetColorSpace(constFmt) == nil {
-            vImageCVImageFormat_SetColorSpace(cvFmt, srgb)
-        }
-        // 4:2:0 needs a chroma siting to upsample; ARKit tags it, but an untagged
-        // buffer (e.g. the simulator's) would fail converter creation without one.
-        if vImageCVImageFormat_GetChromaSiting(constFmt) == nil {
-            vImageCVImageFormat_SetChromaSiting(cvFmt, kCVImageBufferChromaLocation_Center)
-        }
         var cgFmt = vImage_CGImageFormat(
             bitsPerComponent: 8, bitsPerPixel: 32,
             colorSpace: Unmanaged.passRetained(srgb),
@@ -147,6 +138,9 @@ enum YCbCr420 {
                               kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
         CVBufferSetAttachment(pb, kCVImageBufferCGColorSpaceKey,
                               CGColorSpace(name: CGColorSpace.sRGB)!, .shouldPropagate)
+        // Chroma siting so vImage knows how to upsample the 4:2:0 planes.
+        CVBufferSetAttachment(pb, kCVImageBufferChromaLocationTopFieldKey,
+                              kCVImageBufferChromaLocation_Center, .shouldPropagate)
 
         CVPixelBufferLockBaseAddress(pb, [])
         defer { CVPixelBufferUnlockBaseAddress(pb, []) }
