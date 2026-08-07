@@ -16,39 +16,52 @@ device, or your judgement. Work top to bottom.
 | Archive + `.ipa` export | `ios/scripts/archive.sh`, `ios/scripts/ExportOptions.plist` |
 | Privacy-policy text to host | `ios/PRIVACY.md` |
 
-Verified: `ARCHIVE SUCCEEDED` unsigned, and the shipped `Info.plist` carries
-every key above.
+## Signing and the build — done
+
+`ios/scripts/archive.sh` ran end to end. `-allowProvisioningUpdates` created
+the missing pieces automatically:
+
+- **Apple Distribution certificate** — issued, cloud-managed by Xcode. It does
+  not appear in `security find-identity` because the private key lives in
+  Xcode's managed store rather than your login keychain. That is normal for
+  automatic signing, but it does tie the identity to Xcode on this Mac; if you
+  ever sign from another machine or CI, export it from Xcode → Settings →
+  Accounts, or switch to an App Store Connect API key.
+- **App ID `dev.wurld.WurldCam`** — registered (an explicit, non-wildcard
+  profile was issued for it).
+- **`iOS Team Store Provisioning Profile: dev.wurld.WurldCam`** — created.
+
+Result: `ios/build/export/WurldCam.ipa`, 2.9 MB, signed
+`Apple Distribution: Kevin Matzen (R5326Y7EZ4)`, `get-task-allow = false`,
+`MinimumOSVersion 17.0`, carrying `Assets.car`, the app icons and
+`PrivacyInfo.xcprivacy`. This is a valid App Store binary.
 
 ## Blockers only you can clear
 
-1. **Apple Distribution certificate.** You have *Apple Development* and
-   *Developer ID Application*, but no *Apple Distribution* — App Store export
-   cannot sign without it. Xcode creates one on first use: Organizer →
-   Distribute App → App Store Connect. Certificates are account-wide and
-   limited in number, so this is yours to make, not a script's.
+1. **Create the app record.** <https://appstoreconnect.apple.com> → Apps → +.
+   The App ID already exists; this is the store-listing record. Pick the name
+   there — "WurldCam" may be taken, and the listing name need not match the
+   binary's display name.
 
-2. **Register the App ID and create the app record.** Bundle ID
-   `dev.wurld.WurldCam` on <https://appstoreconnect.apple.com>. Pick the app
-   name there — "WurldCam" may already be taken; the binary's display name and
-   the store listing name do not have to match.
+2. **Host the privacy policy.** A URL is mandatory. `ios/PRIVACY.md` is written
+   and accurate; publish it (GitHub Pages on the `wurld` repo works, but that
+   repo is currently **private** — the URL must be publicly reachable).
 
-3. **Host the privacy policy.** A URL is mandatory. `ios/PRIVACY.md` is written
-   and accurate; publish it (GitHub Pages on the `wurld` repo works, but note
-   that repo is currently **private** — it must be reachable publicly).
+3. **Screenshots.** Required: 6.9" iPhone, 1290×2796 or 1320×2868. Take them on
+   your 15 Pro (Volume-Up + Side), mid-capture. The 15 Pro shoots 1179×2556,
+   which App Store Connect will not accept directly — but it is the same 0.4613
+   aspect ratio, so upscaling to 1290×2796 is exact and lossless in framing.
+   Neither the simulator nor any tooling here can substitute: the vendored libs
+   are device-only arm64, there is no LiDAR in the simulator, and generated
+   screenshots would misrepresent the app.
 
-4. **Screenshots.** Required: 6.9" iPhone (1320×2868 or 1290×2796). Take them
-   on your 15 Pro with Volume-Up + Side, mid-capture with the point cloud
-   visible. The simulator is not an option — the vendored libs are device-only
-   arm64 and there is no LiDAR in the simulator.
-
-5. **Privacy nutrition labels** in App Store Connect. Answer **"No, we do not
+4. **Privacy nutrition labels** in App Store Connect. Answer **"No, we do not
    collect data from this app"** — that matches `PrivacyInfo.xcprivacy` and the
    absence of any network code. A mismatch here is a common rejection.
 
-6. **Upload.** `ios/scripts/archive.sh` produces the `.ipa`; upload with
-   Transporter or Xcode Organizer. Bump `CURRENT_PROJECT_VERSION` in
-   `project.yml` before each upload — App Store Connect rejects a repeat build
-   number.
+5. **Upload.** Transporter.app or Xcode Organizer, using the `.ipa` above. Bump
+   `CURRENT_PROJECT_VERSION` in `project.yml` before each subsequent upload —
+   App Store Connect rejects a repeat build number.
 
 ## Review risks worth pre-empting
 
@@ -103,9 +116,18 @@ confidence in one streamable file. Open standard, no cloud, no account.
 
 **Category**: Developer Tools (primary), Graphics & Design (secondary).
 
-## Before you ship
+## Capture quality — verified on device
 
-The capture pipeline has had exactly one real-world test, which surfaced ten
-dropped-frame stalls in 5.6 s. The backpressure fix is in but unproven on
-hardware — record a few takes of varying length and check the reported skip
-count before submitting.
+The backpressure fix is confirmed against real captures pulled off the phone:
+
+| take | frames | fps | stalls (dt > 3× median) | worst dt |
+|---|---|---|---|---|
+| before fix | 99 | 17.6 | 10 (10%) | 0.317 s |
+| before fix | 124 | 17.6 | 13 (11%) | 0.333 s |
+| **after fix** | 102 | 15.2 | **0 (0%)** | **0.183 s** |
+
+Stalls are gone. Nominal rate fell 17.6 → 15.2 fps, which is the intended
+trade: skipping a frame outright costs one sample, while queuing one starves
+ARKit's buffer pool and costs several. If you want the rate back, the lever is
+`frameInterval` in `CaptureController.swift` — but check the skip count after
+changing it.
