@@ -7,72 +7,65 @@ import Foundation
 /// free of ARKit so they compile and unit-test on macOS without a device.
 ///
 /// The device path converts the camera's YpCbCr (4:2:0 biplanar) buffer into
-/// colour-managed **sRGB** RGBA at the depth grid. vImage reads the buffer's own
-/// colour tags — YpCbCr matrix, chroma siting, primaries, transfer function,
-/// range — and does the matrix, chroma upsample, gamut map and transfer
-/// re-encode in one SIMD pass. That is the same colour science Core Image
-/// applied when it rendered into an sRGB colour space, but without building a
-/// filter graph or forcing a synchronous GPU->CPU readback every frame.
+/// RGBA at the depth grid with vImage: the YpCbCr->RGB matrix (from the buffer's
+/// tagged matrix + range) and chroma upsample in one SIMD pass, then a downscale.
+/// No Core Image filter graph and no synchronous GPU->CPU readback — the step
+/// that made the write chain miss frames.
 ///
-/// Contrast with a bare `vImageConvert_420Yp8_CbCr8ToARGB8888`, which does only
-/// the YpCbCr matrix and leaves the result in the camera's native space — wrong
-/// whenever the camera is not already sRGB (wide-gamut capture is often P3).
+/// This applies the colour *matrix* but not a primaries/transfer gamut remap, so
+/// the result is the camera's own R'G'B' treated as sRGB. That matches ARKit's
+/// capture (BT.709 / sRGB-compatible) and the simulator's tagging; a wide-gamut
+/// (Display P3) source would need the fuller colour-managed path.
 final class PixelConverter {
     enum ConvertError: Error {
         case unsupportedFormat(OSType)
+        case generate(vImage_Error)
         case convert(vImage_Error)
         case scale(vImage_Error)
+        case scratch(vImage_Error)
     }
 
-    private let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+    /// YpCbCr->RGB conversion, built once. `full` is the RGBA image at the source
+    /// resolution, reused across frames. All touched only on the caller's serial
+    /// write queue, one frame at a time (`maxInFlight == 1`), so no locking.
+    private var info = vImage_YpCbCrToARGB()
+    private var ready = false
+    private var full = vImage_Buffer()
+    private var fullW = 0, fullH = 0
 
-    /// Camera YpCbCr -> colour-managed sRGB RGBA, downscaled to `width`x`height`.
-    /// Throws on any failure so the caller surfaces it rather than silently
-    /// writing wrong colour.
-    ///
-    /// `vImageBuffer_InitWithCVPixelBuffer` does the whole colour-managed
-    /// conversion in one call — reading the buffer's matrix/primaries/transfer/
-    /// range/siting tags, applying the YpCbCr matrix, chroma upsample, gamut map
-    /// and transfer re-encode to sRGB — then a SIMD downscale to the depth grid.
-    /// No filter graph, no synchronous GPU->CPU readback. (It rebuilds an internal
-    /// converter per call; caching one via `vImageConvert_AnyToAny` is a possible
-    /// later optimisation, but the per-call setup is CPU-cheap next to the readback
-    /// this replaces.)
+    deinit { if full.data != nil { free(full.data) } }
+
     func sRGBA(from buffer: CVPixelBuffer, width: Int, height: Int) throws -> [UInt8] {
         let fmt = CVPixelBufferGetPixelFormatType(buffer)
-        guard fmt == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-                || fmt == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        let fullRange = fmt == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        guard fullRange || fmt == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         else { throw ConvertError.unsupportedFormat(fmt) }
 
-        // Both sources are fully colour-tagged: ARKit tags the camera frame, and
-        // `YCbCr420.make` tags the simulator buffer with matrix, colour space and
-        // chroma siting — so the CV format builds straight from the buffer.
-        let cvFmt = vImageCVImageFormat_CreateWithCVPixelBuffer(buffer).takeRetainedValue()
-        // Byte order R,G,B,A in memory: alpha-last *component* plus big-endian
-        // 32-bit words (default byte order on little-endian arm64 would store the
-        // word reversed, i.e. skip-first with R/B swapped). premultipliedLast on
-        // an opaque source leaves RGB untouched and sets A = 255, matching what
-        // the chromapakz encoder expects.
-        let bitmap = CGImageAlphaInfo.premultipliedLast.rawValue
-            | CGBitmapInfo.byteOrder32Big.rawValue
-        var cgFmt = vImage_CGImageFormat(
-            bitsPerComponent: 8, bitsPerPixel: 32,
-            colorSpace: Unmanaged.passRetained(srgb),
-            bitmapInfo: CGBitmapInfo(rawValue: bitmap),
-            version: 0, decode: nil, renderingIntent: .defaultIntent)
+        if !ready { try generate(fullRange: fullRange, matrix709: isBT709(buffer)) }
 
-        var full = vImage_Buffer()
-        let initRC = vImageBuffer_InitWithCVPixelBuffer(
-            &full, &cgFmt, buffer, cvFmt, nil, vImage_Flags(kvImageNoFlags))
-        guard initRC == kvImageNoError else { throw ConvertError.convert(initRC) }
-        defer { free(full.data) }
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
 
-        if let fp = full.data?.assumingMemoryBound(to: UInt8.self) {
-            let fo = (Int(full.height) / 2) * full.rowBytes + (Int(full.width) / 2) * 4
-            let d = "DIAG full \(full.width)x\(full.height) rb=\(full.rowBytes) "
-                + "center=[\(fp[fo]),\(fp[fo + 1]),\(fp[fo + 2]),\(fp[fo + 3])]\n"
-            FileHandle.standardError.write(Data(d.utf8))
+        let sw = CVPixelBufferGetWidthOfPlane(buffer, 0)
+        let sh = CVPixelBufferGetHeightOfPlane(buffer, 0)
+        try ensureFull(width: sw, height: sh)
+
+        var yp = vImage_Buffer(data: CVPixelBufferGetBaseAddressOfPlane(buffer, 0),
+                               height: vImagePixelCount(sh), width: vImagePixelCount(sw),
+                               rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 0))
+        var cbcr = vImage_Buffer(data: CVPixelBufferGetBaseAddressOfPlane(buffer, 1),
+                                 height: vImagePixelCount(CVPixelBufferGetHeightOfPlane(buffer, 1)),
+                                 width: vImagePixelCount(CVPixelBufferGetWidthOfPlane(buffer, 1)),
+                                 rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 1))
+
+        // The convert emits canonical ARGB; permuteMap [1,2,3,0] rewrites it to
+        // R,G,B,A in memory — the order the chromapakz encoder reads.
+        let permute: [UInt8] = [1, 2, 3, 0]
+        let convRC = permute.withUnsafeBufferPointer { map in
+            vImageConvert_420Yp8_CbCr8ToARGB8888(&yp, &cbcr, &full, &info, map.baseAddress, 255,
+                                                 vImage_Flags(kvImageNoFlags))
         }
+        guard convRC == kvImageNoError else { throw ConvertError.convert(convRC) }
 
         var out = [UInt8](repeating: 0, count: width * height * 4)
         let scaleRC: vImage_Error = out.withUnsafeMutableBytes { dstBytes in
@@ -83,6 +76,41 @@ final class PixelConverter {
         }
         guard scaleRC == kvImageNoError else { throw ConvertError.scale(scaleRC) }
         return out
+    }
+
+    /// BT.709 unless the buffer explicitly tags BT.601. ARKit and the simulator
+    /// both use 709.
+    private func isBT709(_ buffer: CVPixelBuffer) -> Bool {
+        guard let m = CVBufferGetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil)?
+            .takeUnretainedValue() as? String
+        else { return true }
+        return m != (kCVImageBufferYCbCrMatrix_ITU_R_601_4 as String)
+    }
+
+    private func generate(fullRange: Bool, matrix709: Bool) throws {
+        var range = fullRange
+            ? vImage_YpCbCrPixelRange(Yp_bias: 0, CbCr_bias: 128,
+                                      YpRangeMax: 255, CbCrRangeMax: 255,
+                                      YpMax: 255, YpMin: 0, CbCrMax: 255, CbCrMin: 0)
+            : vImage_YpCbCrPixelRange(Yp_bias: 16, CbCr_bias: 128,
+                                      YpRangeMax: 235, CbCrRangeMax: 240,
+                                      YpMax: 255, YpMin: 0, CbCrMax: 255, CbCrMin: 0)
+        var matrix = (matrix709 ? kvImage_YpCbCrToARGBMatrix_ITU_R_709_2
+                                : kvImage_YpCbCrToARGBMatrix_ITU_R_601_4).pointee
+        let rc = vImageConvert_YpCbCrToARGB_GenerateConversion(
+            &matrix, &range, &info, kvImage420Yp8_CbCr8, kvImageARGB8888,
+            vImage_Flags(kvImageNoFlags))
+        guard rc == kvImageNoError else { throw ConvertError.generate(rc) }
+        ready = true
+    }
+
+    private func ensureFull(width: Int, height: Int) throws {
+        if full.data != nil, fullW == width, fullH == height { return }
+        if full.data != nil { free(full.data); full.data = nil }
+        let rc = vImageBuffer_Init(&full, vImagePixelCount(height), vImagePixelCount(width),
+                                   32, vImage_Flags(kvImageNoFlags))
+        guard rc == kvImageNoError else { full.data = nil; throw ConvertError.scratch(rc) }
+        fullW = width; fullH = height
     }
 }
 
