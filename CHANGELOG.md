@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1 — 2026-08-06
+
+Documentation-only republish: the package page now carries the current README
+and CHANGELOG. No code changes.
+
 ## 1.1.0 — 2026-08-06
 
 The project takes its final name: **wurld** — *the World's Unbroken Record of
