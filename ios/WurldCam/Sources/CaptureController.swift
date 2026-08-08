@@ -32,6 +32,10 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     let session = ARSession()
     private let ciContext = CIContext()
+    /// Camera YpCbCr -> colour-managed sRGB RGBA at the depth grid, on the CPU
+    /// with vImage. Built once; touched only on `writeQueue`, one frame at a
+    /// time (`maxInFlight == 1`), so no locking is needed.
+    private let pixelConverter = PixelConverter()
     private var zip: ZipWriter?
     private var poses: [[Double]] = []
     private var timestamps: [Double] = []
@@ -104,8 +108,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         inFlightLock.unlock()
         if busy { return }
 
-        guard let image = SimulatedSensor.makeBGRA(fromRGBA: sim.rgb,
-                                                   width: sim.depthWidth, height: sim.depthHeight),
+        guard let image = SimulatedSensor.makeYCbCr420(fromSRGBA: sim.rgb,
+                                                       width: sim.depthWidth, height: sim.depthHeight),
               let depth = SimulatedSensor.makeDepth(from: sim.depth,
                                                     width: sim.depthWidth, height: sim.depthHeight),
               let conf = SimulatedSensor.makeConfidence(from: sim.confidence,
@@ -312,7 +316,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             timestamp: max(0, timestamp - (wlFirstTimestamp ?? timestamp)),
             duration: frameInterval)
 
-        let rgba = rgbaPlane(image, width: dw, height: dh)
+        let rgba = try pixelConverter.sRGBA(from: image, width: dw, height: dh)
         let z = floatPlane(depth)
         var conf = [UInt16](repeating: 2, count: dw * dh)  // "high" when ARKit omits the map
         if let confidence {
@@ -327,19 +331,6 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         try wlEncoder?.addFrame(rgba: rgba,
                                 depth: ChromapakzStreamEncoder.quantize(z, near: wlNear, far: wlFar),
                                 confidence: conf)
-    }
-
-    private func rgbaPlane(_ buffer: CVPixelBuffer, width: Int, height: Int) -> [UInt8] {
-        var ci = CIImage(cvPixelBuffer: buffer)
-        let sx = CGFloat(width) / ci.extent.width, sy = CGFloat(height) / ci.extent.height
-        ci = ci.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
-        var out = [UInt8](repeating: 0, count: width * height * 4)
-        out.withUnsafeMutableBytes { buf in
-            ciContext.render(ci, toBitmap: buf.baseAddress!, rowBytes: width * 4,
-                             bounds: CGRect(x: 0, y: 0, width: width, height: height),
-                             format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
-        }
-        return out
     }
 
     private func floatPlane(_ buffer: CVPixelBuffer) -> [Float] {
