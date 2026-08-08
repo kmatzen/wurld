@@ -13,7 +13,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CHROMAPAKZ_VERSION="0.7.0"
+CHROMAPAKZ_VERSION="0.8.0"
 CDN="https://cdn.jsdelivr.net/npm/chromapakz@${CHROMAPAKZ_VERSION}/src/chromapakz.js"
 
 OUT="$ROOT/docs/viewer"

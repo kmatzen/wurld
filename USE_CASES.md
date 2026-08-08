@@ -343,21 +343,29 @@ is declared rather than a private convention, with writer and reader support and
 a SPEC paragraph. Small and well understood. Until then this works but no
 consumer knows to do it.
 
-**HDR10 display track — feasible, deliberately deferred.** Verified against the
-libvpx we build (v1.16.0, `--enable-vp9-highbitdepth`): profile-2 10-bit encoder
-init succeeds, `VP9E_SET_COLOR_SPACE` accepts BT.2020, `I42016` allocates. Three
-things are missing: chromapakz pins `g_profile=0` and 8-bit `I420`; the ABI
-takes `const uint8_t* rgba` and would need a 16-bit input path; and **no WebM
-`Colour` element is written at all** — no transfer characteristics, primaries,
-mastering metadata or MaxCLL/MaxFALL — so a 10-bit track would still be
-displayed as washed-out SDR.
+**HDR10 display track — shipped in ChromaPakZ 0.8.0, not yet used by wurld.**
+[#51](https://github.com/kmatzen/ChromaPakZ/issues/51) landed: VP9 profile 2,
+10-bit, BT.2020 non-constant-luminance, and — the part that decides whether a
+player treats it as HDR at all — the WebM `Colour` element (PQ 16 or HLG 18,
+primaries 9, matrix 9, range, optional MaxCLL/MaxFALL and ST 2086 mastering
+metadata), written byte-identically by both muxers. Metadata carries the full
+WebCodecs codec string `vp09.02.10.10.01.09.16.09` and an `hdr` object.
+SDR files are byte-unchanged; pre-0.8.0 readers fail loudly on a profile-2
+stream rather than mis-decoding it.
 
-*Plan:* deferred, and tracked as
-[ChromaPakZ #51](https://github.com/kmatzen/ChromaPakZ/issues/51). It buys HDR in
-browsers only, since Apple players cannot open the container regardless, and the
-display track is a colour reference beside bit-exact depth rather than the
-deliverable. Worth doing after the scene-referred work, and its definition of
-done includes real-browser verification, which is unavailable here.
+Two things to know before reaching for it:
+
+- **wurld does not expose it.** `wl.write()` and `StreamWriter` have no `hdr`
+  passthrough, so a wurld file cannot be HDR today without going around them to
+  chromapakz. Wiring it through is small, but it is a deliberate step and the
+  SPEC should say what an HDR display track means beside bit-exact depth.
+- **Our browser viewer cannot draw HDR RGB.** chromapakz's JS decoder skips HDR
+  RGB streams — there is no 10-bit WebCodecs output path yet — so signals and
+  SDR decode but the colour pane would be empty. Plain `<video>` playback in a
+  browser does work, which is the display track's actual job.
+
+Still worth repeating why this is a browser-and-VLC benefit only: Apple players
+cannot open the container at any bit depth.
 
 ### Multi-camera pixel storage
 
