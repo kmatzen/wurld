@@ -151,9 +151,16 @@ def unpack_frames(buf: bytes, camera_keys: list[str]) -> list[Frame]:
             f"WURLD_FRAMES length {len(buf)} is not a multiple of {_FRAME_RECORD.size}"
         )
     frames = []
-    for rec in _FRAME_RECORD.iter_unpack(buf):
+    for n, rec in enumerate(_FRAME_RECORD.iter_unpack(buf)):
         i, cam, t, qw, qx, qy, qz, tx, ty, tz, flags = rec
         valid = bool(flags & 1)
+        # The camera index comes out of the file; a table that disagrees with the
+        # document's camera list must be rejected, not indexed with.
+        if cam >= len(camera_keys):
+            raise ValueError(
+                f"record {n}: camera index {cam} but only {len(camera_keys)} "
+                f"camera(s) declared ({', '.join(camera_keys) or 'none'})"
+            )
         frames.append(
             Frame(
                 i=i,

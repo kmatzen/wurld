@@ -198,7 +198,12 @@ def _check_frames(r: _Report, doc: dict, tags: dict, cameras: dict) -> list:
             r.error("7", f"WURLD_FRAMES is {len(table)} bytes, not a multiple of "
                          f"{container._FRAME_RECORD.size}")
             return []          # unpacking a partial record would raise, not inform
-        frames = container.unpack_frames(table, camera_keys)
+        try:
+            frames = container.unpack_frames(table, camera_keys)
+        except ValueError as e:
+            # The reader rejects this file; the validator's job is to say why.
+            r.error("7", f"WURLD_FRAMES: {e}")
+            return []
         if fb and "count" in fb and len(frames) != fb["count"]:
             r.error("7", f'frames_binary.count says {fb["count"]} but the table holds '
                          f"{len(frames)}")
@@ -208,7 +213,11 @@ def _check_frames(r: _Report, doc: dict, tags: dict, cameras: dict) -> list:
             r.error("7", f"WURLD_POSES is {len(chunks)} bytes, not a multiple of "
                          f"{container._FRAME_RECORD.size}")
             return []
-        frames = container.unpack_frames(chunks, camera_keys)
+        try:
+            frames = container.unpack_frames(chunks, camera_keys)
+        except ValueError as e:
+            r.error("7", f"WURLD_POSES: {e}")
+            return []
     else:
         source = "JSON frames"
         frames = doc.get("frames") or []

@@ -34,11 +34,23 @@ TRACKS = 0x1654AE6B
 
 
 def _read_vint(data: bytes, pos: int, keep_marker: bool) -> tuple[int, int]:
-    """Return (value, new_pos). keep_marker=True for element IDs."""
+    """Return (value, new_pos). keep_marker=True for element IDs.
+
+    Every byte here comes from a file someone else wrote, so the bounds are
+    checked rather than assumed: without this a truncated vint indexes past the
+    buffer and surfaces as IndexError, which callers cannot distinguish from a
+    bug in their own code.
+    """
+    if pos < 0 or pos >= len(data):
+        raise ValueError(f"vint at {pos} starts past the end of {len(data)} bytes")
     first = data[pos]
     if first == 0:
         raise ValueError(f"invalid vint at {pos}")
     length = 8 - first.bit_length() + 1
+    if pos + length > len(data):
+        raise ValueError(
+            f"vint at {pos} claims {length} bytes but only {len(data) - pos} remain"
+        )
     raw = int.from_bytes(data[pos : pos + length], "big")
     if not keep_marker:
         raw &= (1 << (7 * length)) - 1
