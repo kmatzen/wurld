@@ -22,3 +22,6 @@ ios/.native-build/
 
 # hosted demo sample is intentionally tracked
 !docs/samples/*.webm
+
+# the pinned chromapakz clone build-native.sh makes
+ios/.native-build/

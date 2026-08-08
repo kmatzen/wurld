@@ -12,7 +12,25 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="$ROOT/WurldCam/Vendor"
 BUILD="$ROOT/.native-build"
-CHROMAPAKZ_SRC="${CHROMAPAKZ_SRC:-$HOME/git/chromapakz}"
+# Which ChromaPakZ the vendored libs are built from. Vendor/ is a build artifact
+# (gitignored), so this pin is the only thing that makes an iOS build reproducible
+# — without it the libs come from whatever state a local checkout happens to be in.
+# Keep in step with the pins in pyproject.toml / package.json.
+CHROMAPAKZ_REF="${CHROMAPAKZ_REF:-v0.6.0}"
+# A local checkout wins when explicitly asked for (that is how you test an
+# unreleased change); otherwise clone the pinned tag, so a fresh machine needs
+# nothing set up.
+if [ -n "${CHROMAPAKZ_SRC:-}" ]; then
+  echo "==> chromapakz: local checkout $CHROMAPAKZ_SRC (ref NOT enforced)"
+else
+  CHROMAPAKZ_SRC="$BUILD/chromapakz-$CHROMAPAKZ_REF"
+  if [ ! -d "$CHROMAPAKZ_SRC" ]; then
+    mkdir -p "$BUILD"
+    git clone --depth 1 --branch "$CHROMAPAKZ_REF" \
+      https://github.com/kmatzen/ChromaPakZ "$CHROMAPAKZ_SRC"
+  fi
+  echo "==> chromapakz: $CHROMAPAKZ_REF"
+fi
 MIN_IOS="17.0"
 
 if [ "${1:-}" = "--simulator" ]; then
@@ -75,6 +93,6 @@ fi
 libtool -static -o "$LIBDIR/libchromapakz.a" "$BUILD/chromapakz-$PLATFORM.o"
 cp "$CHROMAPAKZ_SRC/native/chromapakz.h" "$VENDOR/include/"
 
-echo "done:"
+echo "done (chromapakz $CHROMAPAKZ_REF):"
 ls -la "$LIBDIR"
 lipo -info "$LIBDIR/libvpx.a" "$LIBDIR/libchromapakz.a"
