@@ -62,3 +62,42 @@ let tolerance = 12
 print("PixelConvert round-trip: \(W)x\(H), \(colors.count) blocks, max channel error \(maxErr)")
 if maxErr > tolerance { fail("round-trip error \(maxErr) exceeds tolerance \(tolerance)") }
 print("OK")
+
+// A converter is reused across frames, and the conversion it caches is specific
+// to the buffer's range and matrix. Feed it a BT.601-tagged buffer after a
+// BT.709 one: if the cache is keyed on "generated once" rather than on the
+// tagging, the second conversion silently uses 709 coefficients on 601 data.
+let reused = PixelConverter()
+guard let pb709 = YCbCr420.make(fromSRGBA: rgba, width: W, height: H) else {
+    fail("could not build the 709 buffer")
+}
+guard let pb601 = YCbCr420.make(fromSRGBA: rgba, width: W, height: H) else {
+    fail("could not build the 601 buffer")
+}
+CVBufferSetAttachment(pb601, kCVImageBufferYCbCrMatrixKey,
+                      kCVImageBufferYCbCrMatrix_ITU_R_601_4, .shouldPropagate)
+
+let first: [UInt8], second: [UInt8], fresh: [UInt8]
+do {
+    first = try reused.sRGBA(from: pb709, width: W, height: H)
+    second = try reused.sRGBA(from: pb601, width: W, height: H)
+    fresh = try PixelConverter().sRGBA(from: pb601, width: W, height: H)
+} catch {
+    fail("re-tagged conversion threw: \(error)")
+}
+guard first.count == second.count, second.count == fresh.count else {
+    fail("size mismatch across conversions")
+}
+
+// The 601 result must match a converter that only ever saw 601 — i.e. the cache
+// regenerated. It must also differ from the 709 result, or the tags did nothing.
+var reuseErr = 0, matrixDelta = 0
+for i in 0..<second.count where i % 4 != 3 {
+    reuseErr = max(reuseErr, abs(Int(second[i]) - Int(fresh[i])))
+    matrixDelta = max(matrixDelta, abs(Int(second[i]) - Int(first[i])))
+}
+print("cached conversion vs fresh converter (601 after 709): max delta \(reuseErr)")
+if reuseErr != 0 { fail("stale conversion reused across a matrix change (delta \(reuseErr))") }
+print("601 vs 709 output differs by \(matrixDelta) — the tag is being honoured")
+if matrixDelta == 0 { fail("601 and 709 produced identical output; the matrix tag is ignored") }
+print("OK")

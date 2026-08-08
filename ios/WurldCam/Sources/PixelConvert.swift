@@ -29,7 +29,10 @@ final class PixelConverter {
     /// resolution, reused across frames. All touched only on the caller's serial
     /// write queue, one frame at a time (`maxInFlight == 1`), so no locking.
     private var info = vImage_YpCbCrToARGB()
-    private var ready = false
+    /// The (range, matrix) the cached conversion was generated for. A conversion
+    /// built for one tagging silently produces wrong colour for another, so key
+    /// the cache on both rather than on "have we generated once".
+    private var generatedFor: (fullRange: Bool, matrix709: Bool)?
     private var full = vImage_Buffer()
     private var fullW = 0, fullH = 0
 
@@ -41,7 +44,10 @@ final class PixelConverter {
         guard fullRange || fmt == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         else { throw ConvertError.unsupportedFormat(fmt) }
 
-        if !ready { try generate(fullRange: fullRange, matrix709: isBT709(buffer)) }
+        let matrix709 = isBT709(buffer)
+        if generatedFor?.fullRange != fullRange || generatedFor?.matrix709 != matrix709 {
+            try generate(fullRange: fullRange, matrix709: matrix709)
+        }
 
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
@@ -101,7 +107,7 @@ final class PixelConverter {
             &matrix, &range, &info, kvImage420Yp8_CbCr8, kvImageARGB8888,
             vImage_Flags(kvImageNoFlags))
         guard rc == kvImageNoError else { throw ConvertError.generate(rc) }
-        ready = true
+        generatedFor = (fullRange, matrix709)
     }
 
     private func ensureFull(width: Int, height: Int) throws {
