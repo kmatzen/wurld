@@ -247,12 +247,18 @@ raster to occupy. The container is frame-indexed at its core.
 **Sparse or non-raster depth.** Depth from a sparse SfM point cloud has no dense
 grid; padding it into a raster mostly stores "invalid".
 
-**Very wide multi-camera rigs.** SPEC v1 carries one RGB track. Rig extrinsics
-are supported and additional cameras' poses derive from them, but genuine
-multi-camera *pixel* storage is unimplemented — the design is
-[ChromaPakZ #47](https://github.com/kmatzen/ChromaPakZ/issues/47), now being
-implemented. Until it lands, a stereo pair means either two files or one
-camera's pixels.
+**Very wide multi-camera rigs — the gap moved rather than closed.** The payload
+side is done: ChromaPakZ 0.7.0 carries N synchronized RGB streams in one file
+([#47](https://github.com/kmatzen/ChromaPakZ/issues/47)), with the primary
+stream keeping track 1 and the name `rgb` so older readers decode it unchanged
+and ignore the rest.
+
+wurld does not use it yet. SPEC v1 describes one RGB track, and nothing in the
+container layer, the pose table's camera indices, the viewer or the extractors
+knows about a second stream — so a stereo pair still means two files or one
+camera's pixels. Adopting it is a SPEC change and a deliberate decision, not a
+pin bump. Rig extrinsics and derived poses already work regardless (see
+scenario 4).
 
 **Where the frame budget actually is.** On-device capture reaches 30 fps at
 256×192 with RGB, depth and confidence. Higher depth resolutions or more signals
@@ -355,10 +361,20 @@ done includes real-browser verification, which is unavailable here.
 
 ### Multi-camera pixel storage
 
-Genuine multi-camera *pixel* storage (stereo pairs in one file) is the remaining
-structural gap; rig extrinsics and derived poses already work. The design is
-[ChromaPakZ #47](https://github.com/kmatzen/ChromaPakZ/issues/47) and is being
-implemented separately — not covered here to avoid duplicating that work.
+Shipped in ChromaPakZ 0.7.0 ([#47](https://github.com/kmatzen/ChromaPakZ/issues/47)):
+a file can carry N synchronized lossy RGB streams beside the lossless signals,
+all on one frame grid. Metadata is v3 with an `rgbs[]` list; the primary stream
+stays on track 1 under the name `rgb`, so pre-0.7.0 readers are unaffected, and
+signal hi/lo tracks now number after all RGB tracks. There is also a `view` hint
+letting a signal name the RGB stream whose camera frame it lives in — recorded
+verbatim, interpreted by nothing.
+
+**wurld has not adopted it.** The pins are on 0.7.0 and everything builds, but
+SPEC v1 still describes a single RGB track, and the camera model, pose-table
+camera indices, viewer and extractors all assume one. Taking it up means a SPEC
+revision — deciding how `cameras` maps onto `rgbs[]`, whether poses stay
+single-camera with rig-derived siblings or become per-stream, and what the
+viewer shows. Worth doing deliberately; the container is no longer the blocker.
 
 ---
 
