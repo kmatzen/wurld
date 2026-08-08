@@ -152,6 +152,21 @@ def _vtt_timestamp(seconds: float) -> str:
     return f"{int(h):02d}:{int(m):02d}:{s:06.3f}"
 
 
+def _cmd_validate(args) -> int:
+    """Check files against SPEC. Exit 1 if any MUST is violated."""
+    from . import validate as v
+
+    worst = 0
+    for path in args.files:
+        findings = v.validate(path)
+        print(v.format_report(path, findings))
+        if any(f.severity == v.ERROR for f in findings):
+            worst = 1
+        elif args.strict and findings:
+            worst = 1
+    return worst
+
+
 def _cmd_poses(args) -> int:
     """Export poses as text, for readers that will not install anything.
 
@@ -327,6 +342,13 @@ def main(argv=None) -> int:
     p_demo.add_argument("--height", type=int, default=360)
     p_demo.add_argument("--rgb-kbps", type=int, default=4000)
     p_demo.set_defaults(func=_cmd_demo)
+
+    p_val = sub.add_parser(
+        "validate", help="check files against SPEC (exit 1 on a MUST violation)")
+    p_val.add_argument("files", nargs="+")
+    p_val.add_argument("--strict", action="store_true",
+                       help="also fail on warnings and notes")
+    p_val.set_defaults(func=_cmd_validate)
 
     p_poses = sub.add_parser(
         "poses", help="export poses as WebVTT or CSV (readable without wurld)")

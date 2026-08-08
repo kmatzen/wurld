@@ -51,7 +51,17 @@ wurld convert path/to/stray_capture scan.wl.webm       # needs ffmpeg on PATH
 
 # extract back out
 wurld extract demo.wl.webm out/ --format tum        # or transforms | colmap
+
+# check a file against the spec (exit 1 on a MUST violation)
+wurld validate scene.wl.webm
 ```
+
+`validate` turns SPEC's normative requirements into executable checks, so anyone
+writing a producer can confirm their output before shipping it. Findings name the
+section they come from — pose-table ordering and precedence, camera/video
+resolution agreement, quaternion normalisation, timestamp monotonicity, value-map
+sanity, rig and IMU references — with MUST violations as errors and SHOULD as
+warnings.
 
 Python API:
 
