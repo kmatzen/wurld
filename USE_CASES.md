@@ -346,10 +346,12 @@ takes `const uint8_t* rgba` and would need a 16-bit input path; and **no WebM
 mastering metadata or MaxCLL/MaxFALL — so a 10-bit track would still be
 displayed as washed-out SDR.
 
-*Plan:* deferred. It buys HDR in browsers only, since Apple players cannot open
-the container regardless, and the display track is a colour reference beside
-bit-exact depth rather than the deliverable. Worth doing after the scene-referred
-work, and it needs verification on real browsers, which is unavailable here.
+*Plan:* deferred, and tracked as
+[ChromaPakZ #51](https://github.com/kmatzen/ChromaPakZ/issues/51). It buys HDR in
+browsers only, since Apple players cannot open the container regardless, and the
+display track is a colour reference beside bit-exact depth rather than the
+deliverable. Worth doing after the scene-referred work, and its definition of
+done includes real-browser verification, which is unavailable here.
 
 ### Multi-camera pixel storage
 
