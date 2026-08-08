@@ -236,6 +236,11 @@ to put per-object or per-joint motion, so a deforming subject is representable
 only as the pixels that saw it. Object IDs exist as a signal role; object
 *poses* do not.
 
+**Apple-native playback.** QuickTime Player, iOS Photos, Quick Look and Final
+Cut cannot open the file: AVFoundation has no WebM demuxer. Desktop viewing is
+VLC or IINA, browser viewing is the hosted viewer. See Part 4 for the
+measurements and why the container choice stands.
+
 **Event cameras.** Microsecond-resolution asynchronous events have no frame
 raster to occupy. The container is frame-indexed at its core.
 
@@ -244,14 +249,114 @@ grid; padding it into a raster mostly stores "invalid".
 
 **Very wide multi-camera rigs.** SPEC v1 carries one RGB track. Rig extrinsics
 are supported and additional cameras' poses derive from them, but genuine
-multi-camera *pixel* storage is unimplemented — the design is filed as
-[ChromaPakZ #47](https://github.com/kmatzen/ChromaPakZ/issues/47) awaiting
-review. Today a stereo pair means either two files or one camera's pixels.
+multi-camera *pixel* storage is unimplemented — the design is
+[ChromaPakZ #47](https://github.com/kmatzen/ChromaPakZ/issues/47), now being
+implemented. Until it lands, a stereo pair means either two files or one
+camera's pixels.
 
 **Where the frame budget actually is.** On-device capture reaches 30 fps at
 256×192 with RGB, depth and confidence. Higher depth resolutions or more signals
 will exceed the budget again; lossless coding of sensor noise is the cost, and
 it is inherent rather than a tuning problem.
+
+---
+
+## Part 4 — Playback reach, HDR, and what we plan to do about them
+
+Measured 2026-08-08 on macOS 15 (arm64), against
+`docs/samples/synthetic-orbit.wl.webm`. Re-run before trusting these; players
+change.
+
+| player / stack | opens the file | renders the right track |
+|---|---|---|
+| `ffmpeg` / `ffprobe` | yes | all six tracks, addressable by title |
+| VLC 3.x | yes | yes — RGB, verified by dumping the rendered frame |
+| Chrome (WebCodecs) | yes | yes — the hosted viewer decodes natively |
+| IINA | expected, **not measured** | expected — same ffmpeg core as above |
+| QuickTime Player | **no** — AVFoundation `Cannot Open` | — |
+| iOS Photos | **no** — same AVFoundation path | — |
+
+The multi-track question is the one that could have quietly broken the "plays in
+an ordinary player" claim: a wurld file carries three to six video tracks, and a
+player defaulting to `signal-depth-hi` would show a grey gradient. VLC selects
+RGB (track 1) correctly. That is checked by rendering a frame, not by reading a
+track list.
+
+### Why WebM, given that cost
+
+The container was chosen for properties that no Apple-native combination
+provides today:
+
+- **Lossless 16-bit integer planes.** VP9 lossless is what makes bit-exact depth
+  possible at all. It is the format's reason for existing.
+- **Native browser decode with no WASM.** WebCodecs decodes VP9 directly, which
+  is what makes the zero-install viewer work.
+- **Royalty-free**, with no licensing question attached to distributing files.
+- **Element-aligned streaming** with an unknown-size Segment, so a recording that
+  dies mid-take is still valid — demonstrated by an interrupted device capture.
+- **Matroska tags and tracks** for metadata, which is how the pose data rides
+  along without a sidecar.
+
+### What it costs, precisely
+
+AVFoundation has no WebM demuxer, so **QuickTime Player, iOS Photos, Quick Look,
+Preview and Final Cut cannot open a wurld file** — not a bit-depth or HDR issue,
+and not fixable by changing the video codec inside WebM. Safari plays VP9
+through WebKit's own decoder, not the system's, which is why the browser works
+and the Finder does not.
+
+This is accepted, not an oversight. Desktop viewing is VLC or IINA; browser
+viewing is the hosted viewer; everything else goes through ffmpeg
+([EXTRACTING.md](EXTRACTING.md)).
+
+**Not planned:** an MP4/HEVC binding for Apple-native playback. It was measured
+as feasible — HEVC Main 10 / HLG / BT.2020 in MP4 is `isPlayable`, and a
+two-video-track HDR MP4 stays playable — but it is a second container binding
+with the whole Matroska metadata layer to re-do against `udta`/`mebx`, and it
+rests on an unresolved question: whether VideoToolbox decodes lossless HEVC at
+all. Without that, the depth payload has nowhere to live, and the payload is the
+point.
+
+### HDR, in two separate senses
+
+**Scene-referred HDR data — works today, wants a spec entry.** EXR half-float is
+exactly 16 bits, so the raw bit patterns store losslessly as `uint16` signal
+codes, one signal per channel. Measured on synthetic render content with
+path-tracing noise (320×240 half-float RGB):
+
+    raw half-float             450.0 KiB/frame
+    zlib per frame (~EXR/ZIP)  242.7 KiB/frame    1.85x
+    chromapakz lossless         38.6 KiB/frame   11.66x      17.8 ms/frame
+
+**6.3× smaller than EXR/ZIP, bit-exact**, with NaN, ±Inf, −0.0 and denormals all
+surviving. The advantage is temporal — VP9 exploits inter-frame redundancy where
+EXR compresses each frame alone — so expect less on sequences with hard cuts.
+
+*Plan:* add a `value_map` of `{"type": "float16_bits"}` so the reinterpretation
+is declared rather than a private convention, with writer and reader support and
+a SPEC paragraph. Small and well understood. Until then this works but no
+consumer knows to do it.
+
+**HDR10 display track — feasible, deliberately deferred.** Verified against the
+libvpx we build (v1.16.0, `--enable-vp9-highbitdepth`): profile-2 10-bit encoder
+init succeeds, `VP9E_SET_COLOR_SPACE` accepts BT.2020, `I42016` allocates. Three
+things are missing: chromapakz pins `g_profile=0` and 8-bit `I420`; the ABI
+takes `const uint8_t* rgba` and would need a 16-bit input path; and **no WebM
+`Colour` element is written at all** — no transfer characteristics, primaries,
+mastering metadata or MaxCLL/MaxFALL — so a 10-bit track would still be
+displayed as washed-out SDR.
+
+*Plan:* deferred. It buys HDR in browsers only, since Apple players cannot open
+the container regardless, and the display track is a colour reference beside
+bit-exact depth rather than the deliverable. Worth doing after the scene-referred
+work, and it needs verification on real browsers, which is unavailable here.
+
+### Multi-camera pixel storage
+
+Genuine multi-camera *pixel* storage (stereo pairs in one file) is the remaining
+structural gap; rig extrinsics and derived poses already work. The design is
+[ChromaPakZ #47](https://github.com/kmatzen/ChromaPakZ/issues/47) and is being
+implemented separately — not covered here to avoid duplicating that work.
 
 ---
 

@@ -141,6 +141,12 @@ cases where wurld is the wrong tool (multi-agent scenes, camera-less LiDAR
 sweeps, geospatial survey, non-rigid capture). Four scenarios ship as runnable,
 tested examples under `examples/`.
 
+It also carries the measured playback matrix and the HDR plans. In short: VLC,
+Chrome and ffmpeg play these files and pick the right track; **QuickTime and iOS
+Photos cannot open them at all**, because AVFoundation has no WebM demuxer. That
+is a deliberate trade — VP9 lossless is what makes bit-exact depth possible —
+and desktop viewing is VLC or IINA.
+
 ## Layout
 
 - `SPEC.md` — the format (v0.1)
