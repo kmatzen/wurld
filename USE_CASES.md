@@ -5,13 +5,11 @@ sensor-video container. This document looks at the other axis: what people
 actually do with posed RGBD, which scenarios fall out of that, and — for each —
 whether wurld helps, and how. It ends with the cases where it does not.
 
-**On the evidence here.** The pipeline survey below cites sources for four areas
-I researched directly; the rest draws on the format work in this repository
-(importers, exporters and the specification), which is verifiable by reading the
-code. This session's web-search budget ran out partway, so areas marked *(not
-independently surveyed)* rest on working knowledge rather than a citation, and
-should be treated accordingly. Four of the scenarios ship as runnable examples
-under `examples/`; the rest are described but not demonstrated, and are marked.
+**On the evidence here.** The pipeline survey cites sources for each area
+surveyed; claims about this repository's own behaviour are verifiable by reading
+the code or running the examples. Where something rests on working knowledge
+rather than a citation it says so. Four scenarios ship as runnable examples under
+`examples/`, marked ▶; the rest are analysis, not demonstrations.
 
 ---
 
@@ -43,10 +41,17 @@ hundreds of views in a single forward pass, without any pose optimization"
 population: posed RGBD is now something a *model* emits, in bulk, with
 per-pixel confidence and occasional total failure, usually only up to scale.
 
-**Synthetic renderers.** Blender, Isaac Sim, Habitat produce exact poses and
-exact depth. The container question is trivial; the interesting part is that
-synthetic and real data should be interchangeable downstream, which they are not
-when each renderer invents an export layout. *(not independently surveyed)*
+**Synthetic renderers and world models.** Blender, Isaac Sim and Habitat produce
+exact poses and exact depth. More consequentially, generative world models are
+now themselves bulk producers of training data: NVIDIA's Cosmos was trained on
+"20 million hours of real-world data" and exists to emit physics-aware synthetic
+video for robotics and AV training, and Cosmos 3 adds joint video-action
+prediction ([Cosmos 3 technical report][cosmos3], [NVIDIA][nv-wam]). Genie 3
+generates persistent interactive 3D environments in real time ([Genie][genie]).
+The field's own framing is that progress is judged by "closed-loop usefulness,
+controllability, and policy relevance" rather than visual realism — which makes
+the *pose and depth* accompanying generated video the part that matters, and
+that is exactly what tends to get dropped in an MP4.
 
 ### Consumers
 
@@ -69,10 +74,24 @@ Depth, where it exists, is an extra modality bolted alongside.
 associates on timestamp and reports ATE/RPE. The friction is conventions —
 quaternion order and pose direction — not the maths.
 
-**Reconstruction and meshing, dataset curation, browser inspection.** TSDF fusion
-and similar want posed depth in metres with invalid pixels marked. Curation wants
-streaming and random access without downloading everything. Inspection wants to
-open a file and look at it. *(not independently surveyed)*
+**Robot logging and replay.** MCAP is the default rosbag2 storage format since
+ROS 2 Iron (May 2023) and is "used in production by a wide range of companies,
+from autonomous vehicles to drones" ([Foxglove][mcap-ros2], [mcap.dev][mcap]).
+It is serialization-agnostic, row-oriented and append-only, and carries schemas
+alongside data. It is the right tool for heterogeneous robot time-series — and
+the reason wurld exports to it rather than competing with it.
+
+**Dataset distribution.** The large-scale ML convention is sharded sequential
+I/O: WebDataset stores samples in POSIX tar shards, which is fast to stream but
+"does not support efficient random access to individual samples" without a
+side index; Zarr v3 offers chunked cloud-native storage with sharding for
+random-access workloads ([WebDataset on HF][webds], [Zarr][zarr]). Neither is
+camera-aware — they are containers for arrays, so calibration and poses ride
+along as whatever the author invented.
+
+**Reconstruction, meshing and inspection.** TSDF fusion and similar want posed
+depth in metres with invalid pixels marked. Inspection wants to open a file and
+look at it. *(not independently surveyed)*
 
 ---
 
@@ -140,27 +159,45 @@ per episode alongside the Parquet keeps depth and calibration together instead
 of scattering them, and the depth stays lossless. Not demonstrated here; the
 integration exists as a staged PR against LeRobot's depth backend.
 
-### 7. Dataset distribution and streaming
+### 7. Licensing is a first-class constraint on corpus building
+
+Not a format feature, but the thing that actually decides what a corpus can
+contain, and easy to get wrong. The indoor RGBD datasets differ sharply:
+**TUM RGB-D is CC BY 4.0** and redistributable with attribution; **Hypersim is
+CC BY-SA 3.0**; **ARKitScenes** is under Apple's licence, non-commercial;
+**Replica** and **ScanNet** carry their own terms of use ([ARKitScenes][arkitscenes]).
+**EuRoC** is *In Copyright — Non-Commercial Use Permitted*, which despite
+appearances grants no redistribution right at all: non-commercial *use* needs no
+permission, "for other uses you need to obtain permission from the
+rights-holder(s)" ([rightsstatements.org][inc-nc]).
+
+The practical consequence for a converted corpus: TUM and Hypersim can be
+republished with attribution; EuRoC, ScanNet and Replica cannot, and want a
+conversion recipe plus a checksum instead of a mirror. This repository's TUM
+conversion is verified bit-exact against the source PNGs, which is what makes
+republishing it defensible.
+
+### 8. Dataset distribution and streaming
 
 The header carries every pose in one contiguous region, so a client can read
 calibration and the full trajectory in two range requests without touching
 video. That is what makes "index 10,000 files' trajectories" cheap. Verified
 against GitHub Pages and Hugging Face, both of which return HTTP 206.
 
-### 8. Inspection and triage
+### 9. Inspection and triage
 
 Open the file in a browser and look at it: [kmatzen.com/wurld](https://kmatzen.com/wurld/).
 Or read it with tools nobody here controls — `ffprobe` prints the metadata
 document, and poses come out of the WebVTT track with plain ffmpeg. See
 [EXTRACTING.md](EXTRACTING.md).
 
-### 9. Simulation-to-real comparison
+### 10. Simulation-to-real comparison
 
 Synthetic and captured sequences in one format means a pipeline consumes both
 without branching. `world.metric_scale` and `gravity_in_world` carry the
 distinctions that actually differ. Not demonstrated.
 
-### 10. Long-horizon capture and archival
+### 11. Long-horizon capture and archival
 
 Bounded-memory iteration (`iter_frames`), cluster-level random access, and a
 crash-safe streaming layout — a recording that dies mid-take is still valid and
@@ -186,9 +223,13 @@ Forcing it into a range image loses the sweep structure and the per-point
 timing. Use MCAP or a point-cloud format; wurld exports to MCAP for exactly this
 reason.
 
-**Geospatial survey.** No CRS, no georeferencing, no spatial index, no tiling.
-A city-scale capture wants 3D Tiles or COPC, which are built for spatial
-queries over areas rather than temporal playback of one trajectory.
+**Geospatial survey.** No CRS, no georeferencing, no spatial index, no tiling. A
+city-scale capture wants 3D Tiles — an OGC Community Standard since December
+2022, using glTF 2.0 as tile content and built for streaming massive
+heterogeneous 3D geospatial data ([OGC][ogc-3dt], [spec][3dt-spec]) — or COPC
+for point clouds. Those are organised for spatial queries over an *area*; wurld
+is organised for temporal playback of one *trajectory*. Different index, and
+not a gap to be closed by adding fields.
 
 **Non-rigid and articulated capture.** Poses are for cameras. There is nowhere
 to put per-object or per-joint motion, so a deforming subject is representable
@@ -226,6 +267,11 @@ it is inherent rather than a tuning problem.
 - [FIORD: fisheye indoor-outdoor dataset with LiDAR ground truth][fiord]
 - [LeRobotDataset v3.0][lerobot-v3]
 - [LeRobotDataset v3.0 announcement][lerobot-blog]
+- [MCAP as the ROS 2 default bag format][mcap-ros2] · [mcap.dev][mcap]
+- [WebDataset on Hugging Face][webds] · [Zarr streaming concepts][zarr]
+- [Cosmos 3: Omnimodal World Models for Physical AI][cosmos3] · [NVIDIA on world-action models][nv-wam] · [Genie][genie]
+- [OGC adopts 3D Tiles v1.1][ogc-3dt] · [3D Tiles specification][3dt-spec]
+- [ARKitScenes][arkitscenes] (Apple licence, non-commercial)
 - [TUM RGB-D benchmark](https://cvg.cit.tum.de/data/datasets/rgbd-dataset) (CC BY 4.0)
 
 [aria]: https://facebookresearch.github.io/projectaria_tools/docs/faq
@@ -238,3 +284,14 @@ it is inherent rather than a tuning problem.
 [fiord]: https://arxiv.org/pdf/2504.01732
 [lerobot-v3]: https://huggingface.co/docs/lerobot/main/en/lerobot-dataset-v3
 [lerobot-blog]: https://huggingface.co/blog/lerobot-datasets-v3
+[mcap-ros2]: https://foxglove.dev/blog/mcap-as-the-ros2-default-bag-format
+[mcap]: https://mcap.dev/
+[webds]: https://huggingface.co/docs/hub/en/datasets-webdataset
+[zarr]: https://acquire-project.github.io/acquire-docs/dev/core_concepts/
+[cosmos3]: https://research.nvidia.com/labs/cosmos-lab/cosmos3/technical-report.pdf
+[nv-wam]: https://developer.nvidia.com/blog/pretrained-to-imagine-fine-tuned-to-act-the-rise-of-world-action-models/
+[genie]: https://arxiv.org/pdf/2402.15391
+[ogc-3dt]: https://www.ogc.org/announcement/ogc-adopts-3d-tiles-v1-1-as-community-standard/
+[3dt-spec]: https://docs.ogc.org/cs/22-025r4/22-025r4.html
+[arkitscenes]: https://github.com/apple/ARKitScenes
+[inc-nc]: http://rightsstatements.org/page/InC-NC/1.0/
