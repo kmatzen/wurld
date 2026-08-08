@@ -132,6 +132,15 @@ the exact triangle-fold and inverse-depth formulas, checked against the
 reference reader to 1.5 µm. It is also honest about the two things that route
 does not reach (binary pose tables and IMU streams) and what to do instead.
 
+## Use cases
+
+[USE_CASES.md](USE_CASES.md) surveys what people actually build with posed RGBD
+— feed-forward reconstruction, splat and NeRF training, SLAM benchmarking, robot
+rigs, dataset distribution — maps each to the format, and is explicit about the
+cases where wurld is the wrong tool (multi-agent scenes, camera-less LiDAR
+sweeps, geospatial survey, non-rigid capture). Four scenarios ship as runnable,
+tested examples under `examples/`.
+
 ## Layout
 
 - `SPEC.md` — the format (v0.1)
@@ -140,7 +149,9 @@ does not reach (binary pose tables and IMU streams) and what to do instead.
 - `tests/` — round-trip suite (`pytest`): bit-exact depth, pose fidelity, converter
   round trips, COLMAP binary parsing, validation errors
 - `viewer/` — single-file browser viewer
+- `examples/` — runnable scenario walkthroughs (see USE_CASES.md)
 - `LANDSCAPE.md` — the market research that motivated this project
+- `USE_CASES.md` — pipelines, scenarios, and the format's limits
 
 ## Status / verified
 
