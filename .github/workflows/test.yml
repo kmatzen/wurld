@@ -51,6 +51,8 @@ jobs:
         run: pytest tests/test_cpp_reader.py -q
       - name: C++ writer produces files Python validates
         run: pytest tests/test_cpp_writer.py -q
+      - name: C++ streaming writer against real encoder chunks
+        run: pytest tests/test_cpp_stream.py -q
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

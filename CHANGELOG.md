@@ -4,6 +4,13 @@
 
 ### Added
 
+- **C++ streaming writer** (`cpp/include/wurld_stream.hpp`) — the incremental
+  counterpart of `attach()`, which rebuilds a whole file in memory. Metadata is
+  woven between the encoder's Clusters as they arrive, so peak memory is one
+  Cluster plus 45 bytes per pose, and a recording killed mid-flight still reads
+  back what preceded the interruption (asserted by truncating one). Layout is
+  SPEC §9's live form, byte-compatible with the Python `StreamWriter`; the two
+  are checked against each other on the same captured encoder chunks.
 - **`wurld.stream.write_streaming`** — writes a wurld file from an *iterator* of
   frames, holding one frame rather than the sequence. `container.write` takes
   whole arrays, which is fine for a 573-frame TUM capture and impossible for a

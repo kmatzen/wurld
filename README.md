@@ -255,6 +255,27 @@ The bar is equality with Python, not merely readability: `pack_frames` and
 `wurld validate` and read identically through all three readers
 (`tests/test_cpp_writer.py`).
 
+### Recording from C++
+
+`attach()` rebuilds a whole file at once — fine for finalising a clip, useless
+to a robot recording for hours. `cpp/include/wurld_stream.hpp` is the
+incremental form: metadata woven between the encoder's Clusters as they arrive,
+so peak memory is one Cluster plus 45 bytes per pose.
+
+```cpp
+wurld::StreamWriter w([&](const std::string& b){ out.write(b.data(), b.size()); }, doc);
+encoder.on_chunk = [&](const std::string& c){ w.on_encoder_chunk(c); };
+for (...) { w.add_frame(pose); encoder.add_frame(pixels); }
+encoder.finish();
+w.finish();
+```
+
+Same dependency split as everything else here: chromapakz encodes, wurld weaves.
+The layout is SPEC §9's live form and is byte-compatible with the Python
+`StreamWriter` — poses go out *ahead* of the Cluster carrying them, so a
+recording killed mid-flight still reads back everything written before the
+interruption. That is asserted, by truncating a file and reading it.
+
 ## Collections: a corpus as a dataset
 
 One file is one sequence; training is ten thousand of them. A **collection**

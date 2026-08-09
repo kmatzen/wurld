@@ -262,7 +262,13 @@ inline std::string checked_json(const std::string& blob, const std::string& what
 
 /// The WURLD document as JSON. Exposed because it is worth being able to
 /// inspect what the writer will emit without writing a file.
-inline std::string build_document(const WriteDoc& doc, bool binary_frames,
+enum class FramesMode {
+    Json,       ///< poses inline in the document
+    Binary,     ///< empty array plus a `frames_binary` descriptor
+    Streaming,  ///< empty array, no descriptor: the table arrives later, as tags
+};
+
+inline std::string build_document(const WriteDoc& doc, FramesMode mode,
                                   const std::vector<std::string>& camera_keys) {
     // Keep in step with wurld.container.FORMAT_VERSION (SPEC §10).
     std::string out = "{\"format\":\"wurld\",\"version\":\"1.2\"";
@@ -299,7 +305,11 @@ inline std::string build_document(const WriteDoc& doc, bool binary_frames,
     }
     out += "]";
 
-    if (binary_frames) {
+    if (mode == FramesMode::Streaming) {
+        // A live writer does not know the count when the header goes out, and
+        // SPEC 9 lets the consolidated table arrive at the end instead.
+        out += ",\"frames\":[]";
+    } else if (mode == FramesMode::Binary) {
         // The descriptor: readers use it to resolve camera indices and to check
         // the table is complete.
         out += ",\"frames\":[],\"frames_binary\":{\"version\":1,\"count\":" +
@@ -378,7 +388,9 @@ inline std::string attach(const std::string& webm, const WriteDoc& doc) {
                    doc.frames.size() > BINARY_FRAMES_THRESHOLD);
 
     std::vector<std::pair<std::string, std::pair<std::string, bool>>> tags;
-    tags.emplace_back("WURLD", std::make_pair(build_document(doc, binary, camera_keys), false));
+    tags.emplace_back("WURLD", std::make_pair(
+        build_document(doc, binary ? FramesMode::Binary : FramesMode::Json, camera_keys),
+        false));
     if (binary)
         tags.emplace_back("WURLD_FRAMES",
                           std::make_pair(pack_frames(doc.frames, camera_keys), true));
