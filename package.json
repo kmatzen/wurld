@@ -47,10 +47,10 @@
     "test": "node --test \"test/**/*.test.mjs\""
   },
   "devDependencies": {
-    "chromapakz": "^0.8.0"
+    "chromapakz": "^0.9.0"
   },
   "peerDependencies": {
-    "chromapakz": "^0.8.0"
+    "chromapakz": "^0.9.0"
   },
   "peerDependenciesMeta": {
     "chromapakz": {

@@ -406,25 +406,16 @@ class Sequence:
             return
 
         head = data[ps:head_end]
-        # A spliced single-Cluster file still carries the whole sequence's frame
-        # count, and chromapakz sizes its output buffers from that — so each
-        # "one Cluster" decode allocated for the entire file. Measured on a
-        # 600-frame 320x240 sequence: 277 MB per cluster, against 14.7 MB once
-        # the count matches the Cluster. Heads are cached because every Cluster
-        # but the last shares a count.
-        head_cache: dict[int, bytes] = {}
-
-        def head_for(count: int) -> bytes:
-            if count not in head_cache:
-                head_cache[count] = _decode_head(head, count)
-            return head_cache[count]
+        # Built once: the wurld tags are dropped for the per-Cluster decodes, so
+        # a long capture's pose table is not copied alongside every Cluster.
+        decode_head = _decode_head(head)
 
         for k, (first, es, pend) in enumerate(clusters):
             last = (clusters[k + 1][0] if k + 1 < len(clusters) else n) - 1
             if last < start or first >= stop:
                 continue
             spliced = ebml.splice_file(data[:ps], seg_start,
-                                       [head_for(last - first + 1), data[es:pend]])
+                                       [decode_head, data[es:pend]])
             decoded = cz.decode(spliced)
             count = last - first + 1
             for local in range(count):
@@ -498,13 +489,17 @@ def _stream_planes(decoded: dict, index: int) -> dict | None:
     return {sid: np.asarray(arr[index]) for sid, arr in rgbs.items()}
 
 
-def _decode_head(head: bytes, count: int) -> bytes:
-    """A header for decoding one Cluster: `frames` corrected, wurld tags dropped.
+def _decode_head(head: bytes) -> bytes:
+    """A header for decoding one spliced Cluster, with the wurld tags dropped.
 
-    chromapakz allocates output buffers from the header's frame count, so a
-    spliced Cluster must not claim the whole sequence's length. The wurld tags
-    go too — `cz.decode` never reads them, and a binary pose table for a long
-    capture is hundreds of kilobytes copied per Cluster for nothing.
+    `cz.decode` never reads them, and a binary pose table for a long capture is
+    hundreds of kilobytes copied per Cluster for nothing.
+
+    This used to also rewrite CHROMAPAKZ's frame count, because chromapakz sized
+    its output buffers from the header and so allocated for the whole sequence
+    on every partial decode — 277 MB per Cluster against 14.7 MB. That is fixed
+    upstream in chromapakz 0.9.0 (ChromaPakZ #58), which counts the blocks
+    actually present, so the rewrite is gone and the pin moved to match.
     """
     out = b""
     for eid, es, pstart, pend in ebml._top_level(head, 0, len(head)):
@@ -518,9 +513,7 @@ def _decode_head(head: bytes, count: int) -> bytes:
         if chroma is None:
             out += head[es:pend]
             continue
-        meta = json.loads(chroma)
-        meta["frames"] = count
-        out += ebml.build_tags({"CHROMAPAKZ": json.dumps(meta, separators=(",", ":"))})
+        out += ebml.build_tags({"CHROMAPAKZ": chroma})
     return out
 
 

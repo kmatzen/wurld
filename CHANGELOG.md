@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Changed
+
+- **Requires chromapakz >= 0.9.0**, and the header-rewriting workaround is gone.
+  wurld used to rewrite a spliced Cluster's frame count before decoding it,
+  because chromapakz sized its output buffers from the header and so allocated
+  for the whole sequence on every partial decode. That is fixed upstream
+  (ChromaPakZ #58), so the workaround came out; the memory bounds it bought are
+  still asserted by measurement rather than assumed. 0.9.0 also encodes batch
+  tracks concurrently (ChromaPakZ #59), which makes conversion 1.3-1.5x faster
+  wherever a lossless signal is present — a real TUM conversion went 106 s to
+  87 s — with byte-identical output.
+
 ### Fixed
 
 - **EXTRACTING.md never mentioned the second camera.** A multi-camera file

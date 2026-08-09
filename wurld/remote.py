@@ -210,14 +210,12 @@ def fetch_frames(fetch, indices: list[int], header: RemoteHeader | None = None) 
                 "enable random access"
             )
 
-        # The Cluster's own frame count, computed before the decode: chromapakz
-        # sizes its output buffers from the header, so splicing the original
-        # header would allocate for the whole sequence to return one frame.
-        # Measured on a 600-frame 320x240 file: 279 MB for a single frame.
         expected = (starts[k + 1][0] if k + 1 < len(starts) else n_frames) - first_frame
+        # The wurld tags are dropped from the spliced header: a decoder never
+        # reads them, and a pose table would be copied for every ranged fetch.
         spliced = ebml.splice_file(
             hdr.head, hdr.segment_start,
-            [_decode_head(hdr.head[hdr.payload_start:], expected), cluster],
+            [_decode_head(hdr.head[hdr.payload_start:]), cluster],
         )
         decoded = cz.decode(spliced)
         for i in frame_indices:

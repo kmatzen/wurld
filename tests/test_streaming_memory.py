@@ -62,25 +62,27 @@ def test_the_fixture_really_spans_many_clusters(long_file):
     assert cluster_count(long_file) >= 4, "one Cluster means nothing is being bounded"
 
 
-def test_decode_head_corrects_the_frame_count(long_file):
-    """The unit fix: a per-Cluster header must not claim the whole sequence."""
+def test_the_decode_header_passes_chromapakz_metadata_through(long_file):
+    """wurld no longer rewrites the frame count; chromapakz counts the blocks.
+
+    It used to, because chromapakz sized its output buffers from the header and
+    so allocated for the whole sequence on every partial decode. That is fixed
+    upstream in 0.9.0 (ChromaPakZ #58). The bound it bought is still asserted
+    below — by measurement, which is the claim that actually matters — so this
+    only checks the metadata now travels unchanged.
+    """
     data = long_file.read_bytes()
     _, ps, _pe = ebml._segment_bounds(data)
     head_end = next(es for eid, es, _, _ in ebml._top_level(data, ps, _pe)
                     if eid == ebml.CLUSTER)
     head = data[ps:head_end]
 
-    full = json.loads(dict(ebml.collect_simple_tags(
+    before = json.loads(dict(ebml.collect_simple_tags(
         head, *_tags_range(head)))["CHROMAPAKZ"])
-    assert full["frames"] == N
-
-    fixed = container._decode_head(head, 30)
-    meta = json.loads(dict(ebml.collect_simple_tags(
-        fixed, *_tags_range(fixed)))["CHROMAPAKZ"])
-    assert meta["frames"] == 30
-    # Everything else about the stream must survive, or the decode changes.
-    for key in ("width", "height", "fps"):
-        assert meta[key] == full[key]
+    after = json.loads(dict(ebml.collect_simple_tags(
+        container._decode_head(head), *_tags_range(container._decode_head(head))
+    ))["CHROMAPAKZ"])
+    assert after == before
 
 
 def _tags_range(buf):
@@ -97,7 +99,7 @@ def test_wurld_tags_are_dropped_from_the_decode_header(long_file):
     head_end = next(es for eid, es, _, _ in ebml._top_level(data, ps, pe)
                     if eid == ebml.CLUSTER)
     head = data[ps:head_end]
-    fixed = container._decode_head(head, 30)
+    fixed = container._decode_head(head)
     names = {n for n, _ in ebml.collect_simple_tags(fixed, *_tags_range(fixed))}
     assert names == {"CHROMAPAKZ"}
     assert len(fixed) <= len(head)
