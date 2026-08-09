@@ -65,6 +65,25 @@ def test_slam_trajectory_export(tmp_path):
         assert len(line.split()) == 8
 
 
+def test_stereo_rig(tmp_path):
+    out = tmp_path / "stereo.wl.webm"
+    stdout = _run("06_stereo_rig.py", out)
+    assert v.validate(out) == []
+
+    import numpy as np
+    seq = wl.read(out)
+    assert seq.rgb_streams == ["cam0", "cam1"]
+    # Stream ids are camera ids — that binding is the whole mechanism (SPEC §4.4).
+    assert set(seq.rgb_streams) <= set(seq.cameras)
+    # Two genuinely different views, not the same buffer twice.
+    assert not np.array_equal(seq.rgb_for("cam0"), seq.rgb_for("cam1"))
+    # cam1 never had a pose stored; it comes from the rig.
+    assert all(f.camera == "cam0" for f in seq.frames)
+    baseline = np.linalg.norm(seq.rig_c2w(5, "cam1")[:3, 3] - seq.c2w(5)[:3, 3])
+    assert abs(baseline - 0.12) < 1e-4
+    assert "primary first" in stdout
+
+
 def test_hdr_exr_render(tmp_path):
     out = tmp_path / "hdr.wl.webm"
     stdout = _run("05_hdr_exr_render.py", out)

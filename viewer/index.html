@@ -55,6 +55,7 @@
     <button id="play">▶</button>
     <input id="scrub" type="range" min="0" max="0" value="0" step="1">
     <span id="frameinfo">–</span>
+    <span id="streamPick" hidden></span>
     <button id="fit" title="Recenter the 3D view on this frame's geometry">Fit view</button>
     <button id="open">Open file…</button>
   </div>
@@ -153,6 +154,11 @@ function applyMetadata(tags, headline) {
   // plain <video> element, which is what the display track is for.
   const cpz = typeof tags.CHROMAPAKZ === 'string' ? JSON.parse(tags.CHROMAPAKZ) : {};
   state.hdr = (cpz.rgbs || []).map(r => r.hdr).find(Boolean) || null;
+  // Stream ids are camera ids (SPEC §4.4), so a stereo file offers a choice of
+  // eye. Showing only the primary without saying so hides half the file.
+  state.streams = (cpz.rgbs || []).map(r => r.id).filter(Boolean);
+  state.stream = state.streams[0] ?? null;
+  buildStreamPicker();
   state.poses = new Map(); state.cloudCache = new Map(); state.frames = [];
   if (doc) {
     for (const f of doc.frames || []) {
@@ -184,6 +190,37 @@ function applyMetadata(tags, headline) {
   return doc;
 }
 
+/** Pixels for the selected stream, falling back to the primary. */
+function rgbOf(rec) {
+  if (!rec) return null;
+  if (state.stream && rec.rgbs && rec.rgbs[state.stream]) return rec.rgbs[state.stream];
+  return rec.rgb;
+}
+
+function buildStreamPicker() {
+  const host = document.getElementById('streamPick');
+  host.innerHTML = '';
+  if (!state.streams || state.streams.length < 2) { host.hidden = true; return; }
+  host.hidden = false;
+  const label = document.createElement('span');
+  label.textContent = 'camera ';
+  label.style.color = 'var(--dim)';
+  host.appendChild(label);
+  const sel = document.createElement('select');
+  for (const id of state.streams) {
+    const o = document.createElement('option');
+    o.value = id; o.textContent = id;
+    sel.appendChild(o);
+  }
+  sel.value = state.stream;
+  sel.onchange = () => {
+    state.stream = sel.value;
+    state.cloudCache.clear();          // colours came from the old stream
+    setFrame(state.cur);
+  };
+  host.appendChild(sel);
+}
+
 function showMeta(headline) {
   const doc = state.doc;
   document.getElementById('meta').textContent = [
@@ -201,7 +238,7 @@ function showMeta(headline) {
 
 function ingestFrame(frame) {
   const wantedDepthId = (state.doc?.signals || []).find(s => s.role === 'depth')?.id;
-  const rec = { rgb: frame.rgb ?? null, depth: null };
+  const rec = { rgb: frame.rgb ?? null, rgbs: frame.rgbs ?? null, depth: null };
   if (frame.signals) {
     const depthId = wantedDepthId ?? Object.keys(frame.signals)[0];
     if (depthId && frame.signals[depthId]) rec.depth = frame.signals[depthId].u16;
@@ -310,6 +347,7 @@ function cloudForFrame(i) {
   const f = state.frames[i], pose = state.poses.get(i);
   if (!f || !f.depth || !pose || !state.camera) return null;
   const { fx, fy, cx, cy } = camK(state.camera);
+  const px = rgbOf(f);            // colours come from the selected stream
   const meters = depthToMeters(f.depth);
   const { W, H } = state, R = pose.R, t = pose.t;
   const maxPts = Math.ceil(W / STRIDE) * Math.ceil(H / STRIDE);
@@ -322,9 +360,9 @@ function cloudForFrame(i) {
     pos[k*3]   = R[0]*xc + R[1]*yc + R[2]*z + t[0];
     pos[k*3+1] = R[3]*xc + R[4]*yc + R[5]*z + t[1];
     pos[k*3+2] = R[6]*xc + R[7]*yc + R[8]*z + t[2];
-    if (f.rgb) {
+    if (px) {
       const o = (v * W + u) * 4;
-      col[k*3] = f.rgb[o] / 255; col[k*3+1] = f.rgb[o+1] / 255; col[k*3+2] = f.rgb[o+2] / 255;
+      col[k*3] = px[o] / 255; col[k*3+1] = px[o+1] / 255; col[k*3+2] = px[o+2] / 255;
     } else col[k*3] = col[k*3+1] = col[k*3+2] = 0.8;
     k++;
   }
@@ -460,9 +498,10 @@ function drawPanes(i) {
   const f = state.frames[i]; if (!f) return;
   const { W, H } = state;
   const rp = document.getElementById('rgbPane'), dp = document.getElementById('depthPane');
-  if (f.rgb) {
+  const paneRgb = rgbOf(f);
+  if (paneRgb) {
     rp.width = W; rp.height = H;
-    rp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(f.rgb), W, H), 0, 0);
+    rp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(paneRgb), W, H), 0, 0);
   }
   if (f.depth) {
     dp.width = W; dp.height = H;
@@ -535,7 +574,7 @@ async function ensureFrame(i) {
       for (;;) {
         const frame = await dec.readFrame();
         if (!frame || first + j > last) break;
-        const rec = { rgb: frame.rgb ?? null, depth: null };
+        const rec = { rgb: frame.rgb ?? null, rgbs: frame.rgbs ?? null, depth: null };
         if (frame.signals) {
           const depthId = wantedDepthId ?? Object.keys(frame.signals)[0];
           if (depthId && frame.signals[depthId]) rec.depth = frame.signals[depthId].u16;

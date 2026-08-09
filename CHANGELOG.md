@@ -21,6 +21,10 @@
   10-bit codes. Display-referred, and explicitly not a substitute for a
   `float16_bits` signal. The browser viewer says it cannot draw HDR colour
   rather than showing an empty pane.
+- **Viewer: a camera picker** appears when a file carries more than one display
+  stream, and the RGB pane and point-cloud colours follow the selection. Showing
+  only the primary without saying so hid half a stereo file.
+- **`examples/06_stereo_rig.py`** — both eyes, shared depth, rig-derived pose.
 
 Whether this beats EXR depends on temporal coherence: measured against EXR/ZIP,
 13.5x smaller for a static denoised render, 1.5x when the camera moves, and

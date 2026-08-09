@@ -8,7 +8,7 @@ whether wurld helps, and how. It ends with the cases where it does not.
 **On the evidence here.** The pipeline survey cites sources for each area
 surveyed; claims about this repository's own behaviour are verifiable by reading
 the code or running the examples. Where something rests on working knowledge
-rather than a citation it says so. Four scenarios ship as runnable examples under
+rather than a citation it says so. Six scenarios ship as runnable examples under
 `examples/`, marked ▶; the rest are analysis, not demonstrations.
 
 ---
@@ -143,14 +143,26 @@ trajectory. IMU is a stream at its own rate on the same clock — resampling
 wants. The example builds a 12 cm stereo rig with 200 Hz IMU and derives the
 second camera's pose from the first.
 
-### 5. Phone capture to a training set
+### ▶ 5. Stereo rig, both eyes in one file — `examples/06_stereo_rig.py`
+
+Two display streams keyed by camera id, one depth signal shared between them,
+and a 12 cm baseline that lives in `rigs` rather than in every frame. `cam0`
+carries the trajectory; `cam1`'s pose is derived. An older reader sees one RGB
+track and decodes it unchanged, because the primary keeps track 1 and the name
+`rgb`.
+
+The example checks the two eyes actually differ (mean |L−R| ≈ 37/255 from real
+disparity), which is the failure a stereo writer is most likely to ship: the
+same buffer stored twice under two names.
+
+### 6. Phone capture to a training set
 
 The path this repository already implements end to end: WurldCam records
 on-device, or an existing app's output is imported (`wurld convert` handles
 Record3D, Polycam, Stray, TUM, COLMAP, nerfstudio, EuRoC), and the result feeds
 scenario 2 or 4. The value is the count: seven input layouts, one output.
 
-### 6. Robot-learning episodes
+### 7. Robot-learning episodes
 
 LeRobot v3 stores vision as MP4 and state/action as Parquet. wurld is
 complementary rather than competing: it is the *camera-centric* part — posed
@@ -159,7 +171,7 @@ per episode alongside the Parquet keeps depth and calibration together instead
 of scattering them, and the depth stays lossless. Not demonstrated here; the
 integration exists as a staged PR against LeRobot's depth backend.
 
-### 7. Licensing is a first-class constraint on corpus building
+### 8. Licensing is a first-class constraint on corpus building
 
 Not a format feature, but the thing that actually decides what a corpus can
 contain, and easy to get wrong. The indoor RGBD datasets differ sharply:
@@ -177,27 +189,27 @@ conversion recipe plus a checksum instead of a mirror. This repository's TUM
 conversion is verified bit-exact against the source PNGs, which is what makes
 republishing it defensible.
 
-### 8. Dataset distribution and streaming
+### 9. Dataset distribution and streaming
 
 The header carries every pose in one contiguous region, so a client can read
 calibration and the full trajectory in two range requests without touching
 video. That is what makes "index 10,000 files' trajectories" cheap. Verified
 against GitHub Pages and Hugging Face, both of which return HTTP 206.
 
-### 9. Inspection and triage
+### 10. Inspection and triage
 
 Open the file in a browser and look at it: [kmatzen.com/wurld](https://kmatzen.com/wurld/).
 Or read it with tools nobody here controls — `ffprobe` prints the metadata
 document, and poses come out of the WebVTT track with plain ffmpeg. See
 [EXTRACTING.md](EXTRACTING.md).
 
-### 10. Simulation-to-real comparison
+### 11. Simulation-to-real comparison
 
 Synthetic and captured sequences in one format means a pipeline consumes both
 without branching. `world.metric_scale` and `gravity_in_world` carry the
 distinctions that actually differ. Not demonstrated.
 
-### 11. Long-horizon capture and archival
+### 12. Long-horizon capture and archival
 
 Bounded-memory iteration (`iter_frames`), cluster-level random access, and a
 crash-safe streaming layout — a recording that dies mid-take is still valid and
