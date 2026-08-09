@@ -16,6 +16,16 @@
   intrinsics apply. `Sequence.rgb_streams` / `rgb_for(id)` read them. Poses stay
   single-camera with rig-derived siblings; a lone stream keeps the conventional
   id `rgb` and binds implicitly, so existing files are unaffected.
+- **ROS 2 bridge** (`wurld ros2 export|import`, `pip install 'wurld[ros2]'`) —
+  a real rosbag2 of CDR-encoded `sensor_msgs`/`tf2_msgs`, so `ros2 bag play`
+  works and nodes can subscribe. The existing MCAP export writes Foxglove
+  jsonschema channels, which Foxglove reads but no ROS node can. Handles the two
+  conventions that fail silently: ROS quaternions are xyzw where wurld's are
+  wxyz, and ROS optical frames are RDF (REP 145), so `world -> *_optical_frame`
+  is `c2w` unconverted. Depth is `32FC1` metres so NaN survives. IMU declares
+  `orientation_covariance[0] = -1` rather than shipping a believable identity.
+  Import is lossy and says so: depth is requantized (<5 µm measured) and images
+  re-encode through VP9.
 - **C++ writer** (`cpp/include/wurld_write.hpp`) — attaches calibration, poses
   and IMU to an already-encoded WebM, keeping the zero-dependency property:
   chromapakz encodes, wurld attaches. Rebuilds Cues at the shifted offsets and

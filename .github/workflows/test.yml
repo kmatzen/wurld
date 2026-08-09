@@ -24,7 +24,7 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update && sudo apt-get install -y ffmpeg
           else brew install ffmpeg; fi
       - name: Install
-        run: pip install -e ".[dev,mcap,record3d,euroc]"
+        run: pip install -e ".[dev,mcap,record3d,euroc,ros2]"
       - name: Test
         run: pytest tests -q
 

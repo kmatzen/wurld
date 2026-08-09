@@ -306,6 +306,25 @@ def _cmd_demo(args) -> int:
     return 0
 
 
+def _cmd_ros2(args) -> int:
+    from .converters import ros2
+
+    if args.direction == "export":
+        out = ros2.to_rosbag2(args.src, args.out, storage=args.storage,
+                              depth=not args.no_depth, images=not args.no_images)
+        print(f"{out}: rosbag2 ({args.storage}) — /tf, camera_info, image_raw"
+              f"{'' if args.no_depth else ', depth'}")
+    else:
+        from .container import read as _read
+
+        out = ros2.from_rosbag2(args.src, args.out)
+        seq = _read(out)
+        posed = sum(1 for f in seq.frames if f.pose_valid)
+        print(f"{out}: {len(seq.frames)} frames ({posed} posed), "
+              f"{len(seq.cameras)} camera(s)")
+    return 0
+
+
 def _cmd_index(args) -> int:
     from .collection import build_manifest
 
@@ -413,6 +432,18 @@ def main(argv=None) -> int:
     p_pt.add_argument("file")
     p_pt.add_argument("out")
     p_pt.set_defaults(func=_cmd_pose_track)
+
+    p_ros = sub.add_parser(
+        "ros2", help="convert to or from a rosbag2 (real ROS 2 messages)")
+    p_ros.add_argument("direction", choices=["export", "import"])
+    p_ros.add_argument("src", help="wurld file (export) or rosbag2 directory (import)")
+    p_ros.add_argument("out", help="rosbag2 directory (export) or wurld file (import)")
+    p_ros.add_argument("--storage", choices=["mcap", "sqlite3"], default="mcap")
+    p_ros.add_argument("--no-depth", action="store_true",
+                       help="skip the 32FC1 depth topic")
+    p_ros.add_argument("--no-images", action="store_true",
+                       help="poses and calibration only")
+    p_ros.set_defaults(func=_cmd_ros2)
 
     p_idx = sub.add_parser(
         "index", help="build a collection manifest over many wurld files")

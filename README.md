@@ -147,6 +147,42 @@ Photos cannot open them at all**, because AVFoundation has no WebM demuxer. That
 is a deliberate trade — VP9 lossless is what makes bit-exact depth possible —
 and desktop viewing is VLC or IINA.
 
+## ROS 2
+
+`wurld ros2 export` writes a real **rosbag2** — CDR-encoded `sensor_msgs` and
+`tf2_msgs`, so `ros2 bag play` works and ROS nodes can subscribe. (The older
+`wurld convert --to mcap` writes Foxglove jsonschema channels, which Foxglove
+Studio reads but no ROS node can.)
+
+```bash
+wurld ros2 export scene.wl.webm ./bag          # mcap storage; --storage sqlite3 also
+wurld ros2 import ./bag out.wl.webm
+```
+
+```
+/camera/<id>/image_raw        sensor_msgs/msg/Image        rgb8
+/camera/<id>/camera_info      sensor_msgs/msg/CameraInfo
+/camera/<id>/depth/image_raw  sensor_msgs/msg/Image        32FC1, metres
+/tf                           tf2_msgs/msg/TFMessage       world -> *_optical_frame
+/imu/<id>                     sensor_msgs/msg/Imu
+```
+
+Two conventions this gets right, both of which fail silently when got wrong:
+ROS quaternions are **xyzw** where wurld's are wxyz, and ROS *optical* frames are
+RDF (REP 145) — the same convention wurld uses — so `world -> <cam>_optical_frame`
+is `c2w` with no axis conversion. The `_optical_frame` suffix is what tells a
+consumer not to apply one.
+
+Depth goes out as `32FC1` metres rather than `16UC1` millimetres so NaN survives;
+in the 16-bit convention 0 means both "no return" and "at the sensor".
+
+**Fidelity is one-way.** wurld → rosbag2 is exact. The return leg is not: a bag
+carries no quantization range, so depth is requantized (measured under 5 µm on a
+1.5–2 m scene) and images re-encode through lossy VP9 (mean |Δ| ≈ 3/255). Good
+for moving between ecosystems, not for archival round trips.
+
+Needs `pip install 'wurld[ros2]'`, which does **not** require ROS itself.
+
 ## Conformance corpus
 
 Three readers — Python, JavaScript, C++ — is three chances to disagree.
@@ -265,6 +301,7 @@ the separate scene-manifest concern reserved in SPEC §11.
 - `viewer/` — single-file browser viewer
 - `cpp/` — dependency-free single-header C++17 metadata reader + `wurld_info`
 - `conformance/` — cross-implementation test vectors and their generator
+- `wurld/converters/ros2.py` — rosbag2 bridge (real ROS 2 messages)
 - `wurld/collection.py` — manifests, global indexing, sharded streaming
 - `wurld/integrations/` — nerfstudio DataParser, PyTorch datasets
 - `examples/` — runnable scenario walkthroughs (see USE_CASES.md)
