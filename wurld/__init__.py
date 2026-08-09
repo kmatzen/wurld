@@ -19,7 +19,7 @@ from .stream import StreamReader, StreamWriter
 from .collection import Collection, Drift, Manifest, Member, build_manifest, describe
 from . import conventions
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 __all__ = [
     "Camera",

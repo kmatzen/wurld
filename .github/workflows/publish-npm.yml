@@ -42,7 +42,23 @@ jobs:
             console.log("npm tarball carries " + f.length + " files, all required entries present");
           '
 
+      # The two registries genuinely diverge: a Python-only patch release leaves
+      # viewer/wurld.js untouched, and republishing an unchanged version would
+      # fail the run red for no fault. Skip instead, and say so.
+      - name: Is this version already on npm?
+        id: published
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "wurld-core@$V" version >/dev/null 2>&1; then
+            echo "wurld-core@$V is already published — nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publishing wurld-core@$V"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: npm publish
+        if: steps.published.outputs.skip == 'false'
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

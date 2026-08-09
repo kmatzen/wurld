@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.2.1 — 2026-08-09
+
+Memory fixes for streaming and random access. No format change, no API change;
+`wurld-core` (JavaScript) is unaffected and stays at 1.2.0 — its decoder is
+pull-based and never had the defect.
 
 ### Fixed
 
