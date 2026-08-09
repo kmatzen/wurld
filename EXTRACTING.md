@@ -125,7 +125,24 @@ ffmpeg -i "$F" -map 0:v:0 frames/rgb_%05d.png      # stills
 ffmpeg -i "$F" -map 0:v:0 -c copy rgb.webm          # just the colour track
 ```
 
-Stream 0 is plain VP9. Nothing wurld-specific is involved.
+Stream 0 is plain VP9. Nothing wurld-specific is involved, and it is always the
+primary camera — which is exactly what a player shows.
+
+A multi-camera file carries the others alongside it, titled by camera id
+(SPEC §4.4). Reach them the same way the depth planes are reached, by title:
+
+```sh
+ffprobe -v error -show_entries stream=index:stream_tags=title -of csv=p=0 "$F"
+# 0,rgb            <- primary, camera "0"
+# 1,rgb-cam1       <- camera "cam1"
+
+ffmpeg -i "$F" -map 0:1 -c copy cam1.webm
+```
+
+Which calibration applies to which pixels is the binding the id carries: a
+stream titled `rgb-cam1` is the camera `cameras["cam1"]` describes. Nothing else
+in the file records that, so a stream extracted by position and undistorted with
+the primary's intrinsics will be quietly wrong.
 
 ## Depth, in metres
 

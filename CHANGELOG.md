@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- **EXTRACTING.md never mentioned the second camera.** A multi-camera file
+  carries the other streams titled by camera id, and the recipe now shows how to
+  reach them — with the warning that the id is the only thing binding those
+  pixels to their calibration, so a stream taken by position and undistorted
+  with the primary's intrinsics is quietly wrong.
 - **EXTRACTING.md told readers to pull depth from `0:v:1`.** That is
   `signal-depth-hi` on a plain RGB+depth file, the *second camera's colour* on a
   stereo capture, and something else again when a file carries confidence.

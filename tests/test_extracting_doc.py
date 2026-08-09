@@ -108,3 +108,30 @@ def test_depth_is_not_at_a_fixed_track_index(tmp_path):
     assert positions["mono"] != positions["stereo"], (
         f"depth-hi sits at {positions} — if these ever match, the warning in "
         "EXTRACTING.md is still right in principle but this test proves nothing")
+
+
+def test_the_second_camera_can_be_extracted_by_title(tmp_path):
+    """A stereo file's other eye is reachable with ffmpeg alone.
+
+    The id in the track title is the only thing binding those pixels to the
+    calibration that describes them, so the recipe resolves by title rather than
+    by position.
+    """
+    src = tmp_path / "stereo.wl.webm"
+    subprocess.run([sys.executable, str(EXAMPLES / "06_stereo_rig.py"), str(src)],
+                   capture_output=True, check=True)
+    seq = wl.read(src)
+    assert seq.rgb_streams == ["cam0", "cam1"]
+
+    # The secondary stream is titled rgb-<id>; the primary is plain "rgb".
+    idx = _track_index(src, "rgb-cam1")
+    out = tmp_path / "cam1.webm"
+    subprocess.run(["ffmpeg", "-v", "error", "-i", str(src), "-map", f"0:{idx}",
+                    "-c", "copy", str(out), "-y"], check=True)
+
+    import chromapakz as cz
+    got = cz.decode(out.read_bytes())["rgb"]
+    want = seq.rgb_for("cam1")
+    assert got.shape[0] == want.shape[0]
+    assert np.array_equal(got[..., :3], want[..., :3]), \
+        "the extracted track is not cam1's pixels"
