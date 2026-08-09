@@ -314,3 +314,115 @@ def test_poses_only_export_skips_pixels(source, tmp_path):
     assert not any(t.endswith("image_raw") for t in msgs)
     size = lambda d: sum(p.stat().st_size for p in d.iterdir())
     assert size(lean) < 0.2 * size(full)
+
+
+# --------------------------------------------------------------- multi-camera
+
+@pytest.fixture(scope="module")
+def stereo_bag(tmp_path_factory):
+    """A real stereo file: both eyes must survive the bridge."""
+    d = tmp_path_factory.mktemp("ros2stereo")
+    src = d / "stereo.wl.webm"
+    r = subprocess.run([sys.executable, str(ROOT / "examples" / "06_stereo_rig.py"),
+                        str(src)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return src, ros2.to_rosbag2(src, d / "bag")
+
+
+def test_every_display_stream_is_exported(stereo_bag):
+    """A stereo file exported as one camera looks like a success until it isn't."""
+    src, bag = stereo_bag
+    seq = wl.read(src)
+    assert len(seq.rgb_streams) == 2, "the fixture must be genuinely stereo"
+
+    msgs = read_all(bag)
+    for cam_id in seq.rgb_streams:
+        topic = f"/camera/{cam_id}/image_raw"
+        assert topic in msgs, f"{cam_id} was dropped; topics are {sorted(msgs)}"
+        assert len(msgs[topic]) == len(seq.frames)
+        assert f"/camera/{cam_id}/camera_info" in msgs
+
+
+def test_the_two_exported_eyes_are_not_the_same_image(stereo_bag):
+    """The failure this would otherwise hide: one stream written twice."""
+    src, bag = stereo_bag
+    seq = wl.read(src)
+    msgs = read_all(bag)
+    a = msgs[f"/camera/{seq.rgb_streams[0]}/image_raw"]
+    b = msgs[f"/camera/{seq.rgb_streams[1]}/image_raw"]
+    left = np.asarray(a[0][2].data, dtype=np.uint8)
+    right = np.asarray(b[0][2].data, dtype=np.uint8)
+    assert not np.array_equal(left, right)
+
+
+def test_tf_carries_a_frame_for_every_camera(stereo_bag):
+    """A consumer needs to place both eyes, not just the posed one."""
+    src, bag = stereo_bag
+    seq = wl.read(src)
+    msgs = read_all(bag)
+
+    positions = {}
+    for _, _, m in msgs["/tf"]:
+        for tr in m.transforms:
+            t = tr.transform.translation
+            positions.setdefault(tr.child_frame_id, []).append([t.x, t.y, t.z])
+
+    for cam_id in seq.rgb_streams:
+        assert ros2.optical_frame(cam_id) in positions, f"no tf for {cam_id}"
+
+    # The second camera's transform is derived from the rig, so the distance
+    # between the two frames must be the calibrated baseline, on every frame.
+    a = np.array(positions[ros2.optical_frame(seq.rgb_streams[0])])
+    b = np.array(positions[ros2.optical_frame(seq.rgb_streams[1])])
+    d = np.linalg.norm(a - b, axis=1)
+    assert abs(d.mean() - 0.12) < 1e-4, d.mean()
+    assert d.std() < 1e-9, "a rigid baseline must not vary frame to frame"
+
+
+def test_export_memory_does_not_track_sequence_length(tmp_path):
+    """seq.rgb on a real EuRoC sequence is 4.2 GB per stream.
+
+    Measured as the *shape* of the curve — export two lengths and compare —
+    rather than against a byte count. On a fixture small enough to keep the
+    suite fast, the bag writer's fixed cost swamps any absolute bound, which
+    would make the assertion about the fixture instead of the code.
+    """
+    import tracemalloc
+
+    import chromapakz as cz
+
+    def build(n, path):
+        w, h = 96, 72
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        rgb = np.stack([
+            np.dstack([np.clip((0.5 + 0.4 * np.sin(xx / 5 + i * 0.3)) * 255, 0, 255)] * 3
+                      + [np.full((h, w), 255, np.float32)]).astype(np.uint8)
+            for i in range(n)])
+        f = 1.1 * w
+        wl.write(path,
+                 cameras={"0": wl.Camera("PINHOLE", w, h, [f, f, w / 2, h / 2])},
+                 frames=[wl.Frame(i=i, t=i / 30, camera="0", q_wxyz=(1.0, 0.0, 0.0, 0.0),
+                                  tr=(0.01 * i, 0.0, 0.5)) for i in range(n)],
+                 rgb=rgb, world={"metric_scale": True}, fps=30)
+        return path
+
+    def peak_for(n):
+        src = build(n, tmp_path / f"src{n}.wl.webm")
+        tracemalloc.start()
+        ros2.to_rosbag2(src, tmp_path / f"bag{n}")
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        return peak
+
+    n_short, n_long = 20, 120
+    short, long = peak_for(n_short), peak_for(n_long)
+    length_ratio = n_long / n_short          # 6x
+
+    # Some growth is unavoidable and is not ours: an MCAP writer keeps a message
+    # index, which scales with message count. What must not scale is the pixel
+    # buffer — materialising would put the memory ratio at the length ratio.
+    # Measured here: ~1.9x for 6x the frames.
+    assert long < 0.5 * length_ratio * short, (
+        f"peak grew {long/short:.1f}x for {length_ratio:.0f}x the frames "
+        f"({short/1e6:.1f} -> {long/1e6:.1f} MB) — the exporter looks like it is "
+        "holding the sequence")

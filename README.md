@@ -160,7 +160,7 @@ wurld ros2 import ./bag out.wl.webm
 ```
 
 ```
-/camera/<id>/image_raw        sensor_msgs/msg/Image        rgb8
+/camera/<id>/image_raw        sensor_msgs/msg/Image        rgb8, one per stream
 /camera/<id>/camera_info      sensor_msgs/msg/CameraInfo
 /camera/<id>/depth/image_raw  sensor_msgs/msg/Image        32FC1, metres
 /tf                           tf2_msgs/msg/TFMessage       world -> *_optical_frame
@@ -175,6 +175,11 @@ consumer not to apply one.
 
 Depth goes out as `32FC1` metres rather than `16UC1` millimetres so NaN survives;
 in the 16-bit convention 0 means both "no return" and "at the sensor".
+
+Every display stream is exported, not just the primary, and `/tf` carries a frame
+per camera — the second derived from the rig, so a stereo pair arrives with its
+calibrated baseline intact. Images are streamed rather than decoded whole, since
+`seq.rgb` on a real EuRoC sequence is 4.2 GB per stream.
 
 **Fidelity is one-way.** wurld → rosbag2 is exact. The return leg is not: a bag
 carries no quantization range, so depth is requantized (measured under 5 µm on a

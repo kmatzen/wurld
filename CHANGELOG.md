@@ -52,6 +52,16 @@ pull-based and never had the defect.
 
 ### Fixed
 
+- **`Sequence.iter_frames` dropped every display stream but the primary.** A
+  streaming consumer of a stereo file silently saw one eye — which looks like a
+  working conversion until someone needs the other camera. It now yields
+  `rgbs` (`{camera_id: plane}`) alongside `rgb`.
+- **The ROS 2 exporter dropped every camera but one**, for the same reason, and
+  decoded the whole file to do it. It now streams, exports a topic per display
+  stream, and puts a `/tf` frame on each camera — the second derived from the
+  rig, so a stereo pair keeps its calibrated baseline (measured on real EuRoC:
+  11.01 cm, constant to four decimals). Found by exporting a real stereo
+  sequence and noticing only one `image_raw` topic came out.
 - EuRoC dropped frames whose cam1 image was missing without saying so; it now
   warns with the count. Zero on a real hardware-synced sequence, non-zero on a
   trimmed one — and an unexplained frame count is hard to chase later.

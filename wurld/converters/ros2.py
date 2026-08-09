@@ -44,7 +44,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .. import container
+from .. import container, conventions
 
 # Frames that ROS 2 consumers expect to exist.
 WORLD_FRAME = "world"
@@ -165,7 +165,17 @@ def to_rosbag2(
     if storage not in ("mcap", "sqlite3"):
         raise ValueError(f"storage must be 'mcap' or 'sqlite3', got {storage!r}")
     plugin = StoragePlugin.MCAP if storage == "mcap" else StoragePlugin.SQLITE3
-    rgb = seq.rgb if images else None
+
+    # Every display stream, not just the primary. A stereo file exported as one
+    # camera looks like a successful conversion until somebody wants the other
+    # eye. Streams are camera ids (SPEC §4.4), so each gets its own topic and
+    # its own optical frame.
+    stream_ids = seq.rgb_streams if images else []
+    if stream_ids == ["rgb"]:
+        # The conventional single-stream name is not a camera id; attribute it
+        # to the camera the frames actually name.
+        stream_ids = []
+    want_depth = depth and any(s.role == "depth" for s in seq.signals)
 
     with Writer(out_dir, version=9, storage_plugin=plugin) as bag:
         conns = {}
@@ -177,30 +187,57 @@ def to_rosbag2(
 
         tf_conn = conn("/tf", "tf2_msgs/msg/TFMessage")
 
+        # Streamed rather than decoded whole: seq.rgb on a real EuRoC sequence is
+        # 4.2 GB per stream, and an exporter that cannot open its input is not an
+        # exporter.
+        payloads = seq.iter_frames() if (images or want_depth) else iter(())
+        depth_meta = next((s for s in seq.signals if s.role == "depth"), None)
+
         for idx, f in enumerate(seq.frames):
             ns = int(round(f.t * 1e9))
-            cam_id = f.camera or next(iter(seq.cameras), "0")
-            frame_id = optical_frame(cam_id)
-            cam = seq.cameras.get(cam_id)
+            pose_cam = f.camera or next(iter(seq.cameras), "0")
 
-            if cam is not None:
+            payload = None
+            if images or want_depth:
+                try:
+                    _i, payload = next(payloads)
+                except StopIteration:
+                    payload = None
+
+            # Calibration for every camera whose pixels are going out, plus the
+            # one the poses belong to.
+            for cam_id in dict.fromkeys(list(stream_ids) + [pose_cam]):
+                cam = seq.cameras.get(cam_id)
+                if cam is None:
+                    continue
                 bag.write(conn(f"/camera/{cam_id}/camera_info",
                                "sensor_msgs/msg/CameraInfo"),
-                          ns, ts.serialize_cdr(_camera_info(ts, cam, f.t, frame_id),
-                                               "sensor_msgs/msg/CameraInfo"))
+                          ns, ts.serialize_cdr(
+                              _camera_info(ts, cam, f.t, optical_frame(cam_id)),
+                              "sensor_msgs/msg/CameraInfo"))
 
-            if rgb is not None and idx < len(rgb):
-                msg = _image(ts, f.t, frame_id,
-                             np.ascontiguousarray(rgb[idx][..., :3]), "rgb8")
-                bag.write(conn(f"/camera/{cam_id}/image_raw", "sensor_msgs/msg/Image"),
-                          ns, ts.serialize_cdr(msg, "sensor_msgs/msg/Image"))
+            if payload is not None and images:
+                planes = payload.get("rgbs")
+                if not planes:
+                    primary = stream_ids[0] if stream_ids else pose_cam
+                    planes = {primary: payload.get("rgb")}
+                for cam_id, plane in planes.items():
+                    if plane is None:
+                        continue
+                    msg = _image(ts, f.t, optical_frame(cam_id),
+                                 np.ascontiguousarray(plane[..., :3]), "rgb8")
+                    bag.write(conn(f"/camera/{cam_id}/image_raw",
+                                   "sensor_msgs/msg/Image"),
+                              ns, ts.serialize_cdr(msg, "sensor_msgs/msg/Image"))
 
-            if depth and any(s.role == "depth" for s in seq.signals):
-                metres = seq.depth_meters(idx).astype(np.float32)
-                msg = _image(ts, f.t, frame_id, metres, "32FC1")
-                bag.write(conn(f"/camera/{cam_id}/depth/image_raw",
-                               "sensor_msgs/msg/Image"),
-                          ns, ts.serialize_cdr(msg, "sensor_msgs/msg/Image"))
+            if payload is not None and want_depth and depth_meta is not None:
+                codes = (payload.get("signals") or {}).get(depth_meta.id)
+                if codes is not None:
+                    metres = np.asarray(depth_meta.apply(codes), dtype=np.float32)
+                    msg = _image(ts, f.t, optical_frame(pose_cam), metres, "32FC1")
+                    bag.write(conn(f"/camera/{pose_cam}/depth/image_raw",
+                                   "sensor_msgs/msg/Image"),
+                              ns, ts.serialize_cdr(msg, "sensor_msgs/msg/Image"))
 
             if not f.pose_valid:
                 # No transform at all, rather than identity. tf2 interpolates
@@ -208,20 +245,35 @@ def to_rosbag2(
                 # is the honest behaviour for a frame nothing localised.
                 continue
 
-            tr = ts.types["geometry_msgs/msg/TransformStamped"](
-                header=_header(ts, f.t, WORLD_FRAME),
-                child_frame_id=frame_id,
-                transform=ts.types["geometry_msgs/msg/Transform"](
-                    translation=ts.types["geometry_msgs/msg/Vector3"](
-                        x=float(f.tr[0]), y=float(f.tr[1]), z=float(f.tr[2])),
-                    # ROS quaternions are xyzw; wurld's are wxyz. This reorder is
-                    # the single most common way to get a bridge subtly wrong.
-                    rotation=ts.types["geometry_msgs/msg/Quaternion"](
-                        x=float(f.q_wxyz[1]), y=float(f.q_wxyz[2]),
-                        z=float(f.q_wxyz[3]), w=float(f.q_wxyz[0])),
-                ),
-            )
-            msg = ts.types["tf2_msgs/msg/TFMessage"](transforms=[tr])
+            transforms = [(pose_cam, f.c2w)]
+            # Other cameras on the rig get their own transform, derived from the
+            # calibration, so tf can place both eyes rather than only the one
+            # the poses were stored for.
+            for cam_id in stream_ids:
+                if cam_id == pose_cam or not seq.rigs:
+                    continue
+                try:
+                    transforms.append((cam_id, seq.rig_c2w(idx, cam_id)))
+                except Exception:                      # noqa: BLE001 - no rig entry
+                    pass
+
+            stamped = []
+            for cam_id, c2w in transforms:
+                q, tvec = conventions.matrix_to_pose(np.asarray(c2w))
+                stamped.append(ts.types["geometry_msgs/msg/TransformStamped"](
+                    header=_header(ts, f.t, WORLD_FRAME),
+                    child_frame_id=optical_frame(cam_id),
+                    transform=ts.types["geometry_msgs/msg/Transform"](
+                        translation=ts.types["geometry_msgs/msg/Vector3"](
+                            x=float(tvec[0]), y=float(tvec[1]), z=float(tvec[2])),
+                        # ROS quaternions are xyzw; wurld's are wxyz. This reorder
+                        # is the single most common way to get a bridge subtly
+                        # wrong, and nothing downstream would flag it.
+                        rotation=ts.types["geometry_msgs/msg/Quaternion"](
+                            x=float(q[1]), y=float(q[2]), z=float(q[3]), w=float(q[0])),
+                    ),
+                ))
+            msg = ts.types["tf2_msgs/msg/TFMessage"](transforms=stamped)
             bag.write(tf_conn, ns, ts.serialize_cdr(msg, "tf2_msgs/msg/TFMessage"))
 
         for stream_id, stream in seq.imu.items():

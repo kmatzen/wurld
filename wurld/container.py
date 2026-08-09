@@ -350,7 +350,12 @@ class Sequence:
         return None
 
     def iter_frames(self, start: int = 0, stop: int | None = None):
-        """Yield ``(index, {"rgb": ..., "signals": {...}})`` with bounded memory.
+        """Yield ``(index, {"rgb", "rgbs", "signals"})`` with bounded memory.
+
+        ``rgbs`` is ``{camera_id: plane}`` for a multi-camera file (SPEC §4.4)
+        and None otherwise. Without it a streaming consumer of a stereo file
+        silently sees one eye — the primary — which looks like a working
+        conversion right up until someone needs the other camera.
 
         Decodes one Cluster at a time (splice decode), so an hour-long file
         never holds more than ~1 s of decoded frames. Requires the chromapakz
@@ -395,6 +400,7 @@ class Sequence:
             for i in range(start, stop):
                 yield i, {
                     "rgb": np.asarray(decoded["rgb"][i]) if decoded.get("rgb") is not None else None,
+                    "rgbs": _stream_planes(decoded, i),
                     "signals": {sid: np.asarray(a[i]) for sid, a in decoded["signals"].items()},
                 }
             return
@@ -427,6 +433,7 @@ class Sequence:
                     continue
                 yield i, {
                     "rgb": np.asarray(decoded["rgb"][local]) if decoded.get("rgb") is not None else None,
+                    "rgbs": _stream_planes(decoded, local),
                     "signals": {sid: np.asarray(a[local]) for sid, a in decoded["signals"].items()},
                 }
 
@@ -481,6 +488,14 @@ class Sequence:
 
     def to_document(self) -> dict:
         return _document(self.cameras, self.frames, self.signals, self.world, self.rigs, self.imu)
+
+
+def _stream_planes(decoded: dict, index: int) -> dict | None:
+    """One frame of each display stream, or None when the file has just the one."""
+    rgbs = decoded.get("rgbs")
+    if not rgbs or len(rgbs) < 2:
+        return None
+    return {sid: np.asarray(arr[index]) for sid, arr in rgbs.items()}
 
 
 def _decode_head(head: bytes, count: int) -> bytes:
