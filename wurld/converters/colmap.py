@@ -9,6 +9,7 @@ non-metric; export writes a text model readable by COLMAP and downstream tools.
 from __future__ import annotations
 
 import struct
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -181,6 +182,12 @@ def to_colmap(wl_path: str | Path, out_dir: str | Path, write_images: bool = Tru
     img_dir = out / "images"
     if write_images:
         img_dir.mkdir(exist_ok=True)
+        if len(seq.rgb_streams) > 1:
+            logging.getLogger(__name__).warning(
+                "%s carries %d display streams (%s); this format holds one camera's "
+                "images, so only the primary (%s) is exported",
+                wl_path, len(seq.rgb_streams), ", ".join(seq.rgb_streams),
+                seq.rgb_streams[0])
         rgb = seq.rgb
     for n, f in enumerate(seq.frames, start=1):
         name = f"frame_{f.i:06d}.png"

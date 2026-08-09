@@ -438,3 +438,31 @@ def test_cli_collection_verify_exits_nonzero_on_drift(tmp_path):
     assert bad.returncode == 1
     assert "no longer describes" in bad.stderr
     assert "wurld index" in bad.stderr
+
+
+def test_streaming_a_stereo_member_yields_both_eyes(tmp_path):
+    """The defect fixed in the ROS bridge, checked here too.
+
+    A collection is the dataset path, so a stereo member losing an eye would be
+    silent right up until a model trained on half the cameras.
+    """
+    import shutil
+    src = Path("conformance/vectors/v05_stereo.wl.webm")
+    if not src.exists():
+        pytest.skip("conformance vectors not generated")
+
+    root = tmp_path / "stereo"
+    root.mkdir()
+    shutil.copy(src, root / "a.wl.webm")
+    m, failures = col.build_manifest(root, relative_to=root)
+    assert not failures
+    assert m.members[0].rgb_streams == ["cam0", "cam1"], "fixture must be stereo"
+
+    c = col.Collection(m, root=root)
+    items = list(c.iter_frames(fields=("rgb",)))
+    assert items
+    for it in items:
+        assert sorted(it["rgbs"]) == ["cam0", "cam1"], "a display stream was dropped"
+        assert not np.array_equal(it["rgbs"]["cam0"], it["rgbs"]["cam1"])
+        # The primary stays where a single-camera consumer expects it.
+        assert np.array_equal(it["rgb"], it["rgbs"]["cam0"])

@@ -62,6 +62,12 @@ pull-based and never had the defect.
   rig, so a stereo pair keeps its calibrated baseline (measured on real EuRoC:
   11.01 cm, constant to four decimals). Found by exporting a real stereo
   sequence and noticing only one `image_raw` topic came out.
+- **Collections streamed only the primary eye** of a stereo member, the same
+  defect as the ROS exporter's. `iter_frames(fields=("rgb",))` now also yields
+  `rgbs`; `rgb` stays the primary so single-camera consumers are unaffected.
+- **Exporting a multi-camera file to TUM, COLMAP or nerfstudio warns.** Those
+  formats hold one camera's images, so dropping the rest is correct — doing it
+  without a word was not.
 - EuRoC dropped frames whose cam1 image was missing without saying so; it now
   warns with the count. Zero on a real hardware-synced sequence, non-zero on a
   trimmed one — and an unexplained frame count is hard to chase later.

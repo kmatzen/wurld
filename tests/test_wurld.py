@@ -230,3 +230,20 @@ def test_cli_demo_info_extract(tmp_path, capsys):
     assert main(["convert", str(tmp_path / "tum_out"), str(back)]) == 0
     seq = wl.read(back)
     assert len(seq.frames) == 6
+
+
+def test_single_camera_export_warns_when_a_stream_is_dropped(tmp_path, caplog):
+    """TUM/COLMAP/nerfstudio hold one camera; losing an eye must not be silent."""
+    import logging
+    from pathlib import Path as _P
+
+    from wurld.converters import tum as tum_conv
+
+    src = _P("conformance/vectors/v05_stereo.wl.webm")
+    if not src.exists():
+        pytest.skip("conformance vectors not generated")
+
+    with caplog.at_level(logging.WARNING):
+        tum_conv.to_tum(src, tmp_path / "out")
+    assert any("display streams" in r.getMessage() for r in caplog.records), \
+        "exporting a stereo file to a single-camera format said nothing"

@@ -485,21 +485,14 @@ def _fill_from_partial(item: dict, part: dict, signals, want: set[str]) -> None:
         # Copy: the decoded array is a view into a whole Cluster, and a shuffle
         # buffer holding views would pin every cluster it has seen.
         item["rgb"] = np.array(part["rgb"], copy=True)
+    # A stereo member has to hand over both eyes; `rgb` stays the primary so a
+    # single-camera consumer is unaffected.
+    if "rgb" in want and part.get("rgbs"):
+        item["rgbs"] = {sid: np.array(plane, copy=True)
+                        for sid, plane in part["rgbs"].items()}
     raw = part.get("signals") or {}
     for s in _wanted_signals(want, signals):
         codes = raw.get(s.id)
         if codes is None:
             continue
         item[s.id if s.role != "depth" else "depth"] = s.apply(codes)
-
-
-def _fill_from_whole(item: dict, decoded: dict, seq, li: int, want: set[str]) -> None:
-    if "rgb" in want:
-        rgb = decoded.get("rgb")
-        if rgb is not None:
-            item["rgb"] = rgb[li]
-    for s in _wanted_signals(want, seq.signals):
-        codes = (decoded.get("signals") or {}).get(s.id)
-        if codes is None:
-            continue
-        item[s.id if s.role != "depth" else "depth"] = s.apply(codes[li])
