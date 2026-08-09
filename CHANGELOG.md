@@ -16,21 +16,33 @@
   intrinsics apply. `Sequence.rgb_streams` / `rgb_for(id)` read them. Poses stay
   single-camera with rig-derived siblings; a lone stream keeps the conventional
   id `rgb` and binds implicitly, so existing files are unaffected.
+- **Collections (SPEC §13)** — many wurld files as one dataset. `wurld index`
+  builds a manifest; `Collection` gives global frame addressing across members
+  and sharded streaming. Indexing reads headers only: a file with 100x the
+  pixels of another, at the same frame count, indexes for the same ~8 KiB.
+  Members stay ordinary playable wurld files — a collection is a sidecar, not a
+  container, and asserts nothing about how members relate in space or time
+  (that remains the separate scene-manifest concern reserved in §11).
+- **`wurld.integrations.torch_data`** (`pip install 'wurld[torch]'`) —
+  `WurldIterableDataset` shards across DataLoader workers *and* distributed
+  ranks, decoding each member exactly once; `WurldFrameDataset` is map-style for
+  evaluation. Sharding is tested with real multi-worker DataLoaders asserting
+  disjointness and completeness, because a bad split does not crash — it
+  silently trains on duplicated frames while the loss curve looks healthy.
+- **`examples/08_collection_training.py`**, which verifies its own shard split.
 - **Viewer exports** — `poses.csv`, `imu_<id>.csv`, `wurld.json` and a per-frame
   `depth_NNNNN.npy` (float32 metres, NaN where there was no return). These cover
   precisely what ffmpeg cannot reach: binary pose tables and IMU streams. Poses
   come through the full SPEC §9 precedence chain, so binary tables export like
   JSON ones, and unposed frames are omitted rather than written as identity.
 - **Camera picker in the viewer** — appears only for multi-stream files, and
-  drives both the RGB pane and the point-cloud colours.
+  drives both the RGB pane and the point-cloud colours. Showing only the primary
+  without saying so hid half a stereo file.
 - **HDR display track (SPEC §4.5)** — `wl.write(..., hdr={"transfer": "pq"})`;
   `Sequence.hdr` reports the signalling and `Sequence.rgb` returns `uint16`
   10-bit codes. Display-referred, and explicitly not a substitute for a
   `float16_bits` signal. The browser viewer says it cannot draw HDR colour
   rather than showing an empty pane.
-- **Viewer: a camera picker** appears when a file carries more than one display
-  stream, and the RGB pane and point-cloud colours follow the selection. Showing
-  only the primary without saying so hid half a stereo file.
 - **`examples/06_stereo_rig.py`** — both eyes, shared depth, rig-derived pose.
 
 Whether this beats EXR depends on temporal coherence: measured against EXR/ZIP,

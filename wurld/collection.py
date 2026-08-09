@@ -1,0 +1,413 @@
+"""Many wurld files as one dataset: manifest, global indexing, sharded streaming.
+
+A wurld file holds one sequence. Training holds ten thousand of them, and the
+gap between those two facts is this module. It is deliberately not a new
+container — a collection is a *manifest* plus the files it points at, so every
+member stays an ordinary playable wurld file that keeps working alone.
+
+Three things make the difference:
+
+**Indexing is cheap.** A manifest is built from header reads (``remote.fetch_header``),
+which fetch only the bytes before the first Cluster. Describing a 100 MB file
+costs kilobytes, not 100 MB, and the same path works for ``http(s)://`` members.
+
+**Access is global.** ``Collection`` presents N files as one frame-indexed
+sequence, resolving a global index to (member, local index) by bisection over
+cumulative counts, so nothing scans.
+
+**Iteration shards without overlap.** Sharding is by *member*, not by frame:
+a worker that opens a file uses all of it, decoding once. Shuffling permutes
+members deterministically from a seed and then shards, so shards stay disjoint
+and their union is the whole collection — asserted in the tests, because a
+sharding bug silently trains on duplicated data rather than crashing.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import random
+from bisect import bisect_right
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Iterable, Iterator
+
+from . import container, remote
+
+MANIFEST_VERSION = 1
+_REMOTE_PREFIXES = ("http://", "https://")
+
+
+def _is_remote(uri: str) -> bool:
+    return uri.startswith(_REMOTE_PREFIXES)
+
+
+@dataclass
+class Member:
+    """One file in a collection, described without decoding its pixels."""
+
+    uri: str
+    frames: int = 0
+    posed_frames: int = 0
+    cameras: list[str] = field(default_factory=list)
+    rgb_streams: list[str] = field(default_factory=list)
+    signals: list[str] = field(default_factory=list)
+    metric_scale: bool | None = None
+    t_start: float = 0.0
+    t_end: float = 0.0
+    width: int = 0
+    height: int = 0
+    bytes: int | None = None
+    sha256: str | None = None
+
+    def to_json(self) -> dict:
+        return {k: v for k, v in asdict(self).items() if v is not None}
+
+    @classmethod
+    def from_json(cls, d: dict) -> "Member":
+        known = {f for f in cls.__dataclass_fields__}
+        return cls(**{k: v for k, v in d.items() if k in known})
+
+
+def describe(uri: str | Path, *, checksum: bool = False) -> Member:
+    """Summarise one file from its header alone. Never decodes pixels."""
+    uri = str(uri)
+    if _is_remote(uri):
+        fetch = remote.http_fetcher(uri)
+        size = None
+    else:
+        p = Path(uri)
+        fetch = remote.file_fetcher(p)
+        size = p.stat().st_size
+
+    h = remote.fetch_header(fetch)
+    ts = [f.t for f in h.frames]
+    video = h.video or {}
+    rgbs = video.get("rgbs") or ([{"id": "rgb"}] if video.get("rgb") else [])
+    stream_ids = [r["id"] if isinstance(r, dict) else str(r) for r in rgbs]
+
+    digest = None
+    if checksum and not _is_remote(uri):
+        digest = hashlib.sha256(Path(uri).read_bytes()).hexdigest()
+
+    return Member(
+        uri=uri,
+        frames=len(h.frames),
+        posed_frames=sum(1 for f in h.frames if f.pose_valid),
+        cameras=sorted(h.cameras),
+        rgb_streams=stream_ids,
+        signals=[s.id for s in h.signals],
+        metric_scale=h.world.get("metric_scale"),
+        t_start=float(min(ts)) if ts else 0.0,
+        t_end=float(max(ts)) if ts else 0.0,
+        width=int(video.get("width", 0)),
+        height=int(video.get("height", 0)),
+        bytes=size,
+        sha256=digest,
+    )
+
+
+@dataclass
+class Manifest:
+    """A collection: an ordered list of members plus what they add up to."""
+
+    members: list[Member] = field(default_factory=list)
+    version: int = MANIFEST_VERSION
+    description: str = ""
+    root: Path | None = field(default=None, repr=False)
+
+    @property
+    def total_frames(self) -> int:
+        return sum(m.frames for m in self.members)
+
+    @property
+    def total_posed_frames(self) -> int:
+        return sum(m.posed_frames for m in self.members)
+
+    def to_json(self) -> dict:
+        return {
+            "format": "wurld-collection",
+            "version": self.version,
+            "description": self.description,
+            "totals": {"members": len(self.members),
+                       "frames": self.total_frames,
+                       "posed_frames": self.total_posed_frames},
+            "members": [m.to_json() for m in self.members],
+        }
+
+    def write(self, path: str | Path) -> Path:
+        path = Path(path)
+        path.write_text(json.dumps(self.to_json(), indent=2) + "\n")
+        return path
+
+    @classmethod
+    def from_json(cls, d: dict, root: Path | None = None) -> "Manifest":
+        if d.get("format") != "wurld-collection":
+            raise ValueError(f"not a wurld collection manifest: format={d.get('format')!r}")
+        if int(d.get("version", 0)) > MANIFEST_VERSION:
+            raise ValueError(
+                f"manifest version {d['version']} is newer than this reader "
+                f"understands ({MANIFEST_VERSION})")
+        return cls(members=[Member.from_json(m) for m in d.get("members", [])],
+                   version=int(d.get("version", MANIFEST_VERSION)),
+                   description=d.get("description", ""),
+                   root=root)
+
+    @classmethod
+    def read(cls, path: str | Path) -> "Manifest":
+        path = Path(path)
+        # Relative member uris resolve against the manifest, so a collection
+        # stays movable as a directory.
+        return cls.from_json(json.loads(path.read_text()), root=path.parent)
+
+
+def build_manifest(
+    sources: Iterable[str | Path] | str | Path,
+    *,
+    pattern: str = "*.wl.webm",
+    checksum: bool = False,
+    relative_to: Path | None = None,
+    on_error: str = "raise",
+    description: str = "",
+) -> tuple[Manifest, list[tuple[str, str]]]:
+    """Describe every file in ``sources``; a directory is globbed recursively.
+
+    Returns ``(manifest, failures)``. ``on_error="skip"`` records unreadable
+    files in ``failures`` instead of raising — a collection built over ten
+    thousand files should not die on one truncated member, but it must not
+    hide it either, so nothing is dropped silently.
+    """
+    if isinstance(sources, (str, Path)):
+        sources = [sources]
+
+    paths: list[str] = []
+    for s in sources:
+        if not isinstance(s, (str, Path)) or _is_remote(str(s)):
+            paths.append(str(s))
+            continue
+        p = Path(s)
+        if p.is_dir():
+            paths.extend(sorted(str(q) for q in p.rglob(pattern)))
+        else:
+            paths.append(str(p))
+
+    members, failures = [], []
+    for uri in paths:
+        try:
+            m = describe(uri, checksum=checksum)
+        except Exception as exc:                       # noqa: BLE001 - reported, not swallowed
+            if on_error == "raise":
+                raise
+            failures.append((uri, f"{type(exc).__name__}: {exc}"))
+            continue
+        if relative_to is not None and not _is_remote(m.uri):
+            try:
+                m.uri = str(Path(m.uri).resolve().relative_to(Path(relative_to).resolve()))
+            except ValueError:
+                pass                                   # outside the root; keep it absolute
+        members.append(m)
+
+    return Manifest(members=members, description=description), failures
+
+
+class Collection:
+    """N wurld files addressed as one frame-indexed dataset."""
+
+    def __init__(self, manifest: Manifest, root: str | Path | None = None):
+        self.manifest = manifest
+        self.root = Path(root) if root is not None else manifest.root
+        # Cumulative frame counts for O(log n) global -> (member, local).
+        self._cum: list[int] = []
+        total = 0
+        for m in manifest.members:
+            total += m.frames
+            self._cum.append(total)
+        self._open_index: int | None = None
+        self._open_seq: container.Sequence | None = None
+        self._headers: dict[int, remote.RemoteHeader] = {}
+
+    @classmethod
+    def read(cls, manifest_path: str | Path) -> "Collection":
+        return cls(Manifest.read(manifest_path))
+
+    def __len__(self) -> int:
+        return self._cum[-1] if self._cum else 0
+
+    @property
+    def members(self) -> list[Member]:
+        return self.manifest.members
+
+    def resolve(self, member: Member) -> str:
+        if _is_remote(member.uri) or self.root is None or Path(member.uri).is_absolute():
+            return member.uri
+        return str(self.root / member.uri)
+
+    def locate(self, index: int) -> tuple[int, int]:
+        """Global frame index -> (member index, index within that member)."""
+        n = len(self)
+        if not -n <= index < n:
+            raise IndexError(f"frame {index} out of range for {n} frames")
+        if index < 0:
+            index += n
+        mi = bisect_right(self._cum, index)
+        base = self._cum[mi - 1] if mi else 0
+        return mi, index - base
+
+    def sequence(self, member_index: int) -> container.Sequence:
+        """Open a member, caching the most recent one.
+
+        Sequential iteration touches one file at a time, so a single-slot cache
+        turns "open per frame" into "open per file" without holding a whole
+        collection's bytes.
+        """
+        if self._open_index != member_index:
+            uri = self.resolve(self.manifest.members[member_index])
+            if _is_remote(uri):
+                raise ValueError(
+                    f"{uri} is remote; use Collection.frame() for ranged access, "
+                    "or download the member first")
+            self._open_seq = container.read(uri)
+            self._open_index = member_index
+        return self._open_seq
+
+    def frame(self, index: int, *, fields: Iterable[str] = ()) -> dict:
+        """One frame by global index, decoding as little as the fields allow."""
+        mi, li = self.locate(index)
+        member = self.manifest.members[mi]
+        want = set(fields)
+
+        uri = self.resolve(member)
+        if _is_remote(uri):
+            fetch = remote.http_fetcher(uri)
+            hdr = self._headers.get(mi)
+            if hdr is None:
+                hdr = self._headers[mi] = remote.fetch_header(fetch)
+            item = _pose_fields(hdr.frames[li], member, mi, li)
+            if want:
+                # Pass the cached header so only the frame's clusters are fetched.
+                got = remote.fetch_frames(fetch, [li], header=hdr)
+                _fill_from_partial(item, got["frames"][li], hdr.signals, want)
+            return item
+
+        seq = self.sequence(mi)
+        item = _pose_fields(seq.frames[li], member, mi, li)
+        if want:
+            # Partial decode: touch only the clusters this frame lives in.
+            part = seq.fetch_frames([li])[li]
+            _fill_from_partial(item, part, seq.signals, want)
+        return item
+
+    def iter_members(
+        self,
+        *,
+        shard: tuple[int, int] | None = None,
+        shuffle: int | None = None,
+    ) -> Iterator[tuple[int, Member]]:
+        """Member indices for one shard, optionally in a seeded random order.
+
+        Shards are disjoint and cover everything: members are permuted first
+        (so a shuffle does not change *which* shard owns a member relative to
+        the permuted order) and then dealt round-robin.
+        """
+        order = list(range(len(self.manifest.members)))
+        if shuffle is not None:
+            random.Random(shuffle).shuffle(order)
+        if shard is not None:
+            idx, count = shard
+            if not 0 <= idx < count:
+                raise ValueError(f"shard {idx} out of range for {count} shards")
+            order = order[idx::count]
+        for mi in order:
+            yield mi, self.manifest.members[mi]
+
+    def iter_frames(
+        self,
+        *,
+        fields: Iterable[str] = (),
+        shard: tuple[int, int] | None = None,
+        shuffle: int | None = None,
+        shuffle_buffer: int = 0,
+        posed_only: bool = False,
+    ) -> Iterator[dict]:
+        """Stream frames, decoding each member once.
+
+        ``shuffle`` seeds both the member order and the within-buffer order.
+        A shuffle buffer is used rather than global random access because
+        decoding a file to reach one frame would dominate everything else.
+        """
+        want = set(fields)
+        rng = random.Random(shuffle) if shuffle is not None else None
+        buf: list[dict] = []
+
+        for mi, member in self.iter_members(shard=shard, shuffle=shuffle):
+            uri = self.resolve(member)
+            if _is_remote(uri):
+                raise ValueError(f"{uri} is remote; iter_frames needs local members")
+            seq = self.sequence(mi)
+            decoded = seq._decode() if want else None
+
+            for li, fr in enumerate(seq.frames):
+                if posed_only and not fr.pose_valid:
+                    continue
+                item = _pose_fields(fr, member, mi, li)
+                if want:
+                    _fill_from_whole(item, decoded, seq, li, want)
+                if shuffle_buffer > 1 and rng is not None:
+                    buf.append(item)
+                    if len(buf) >= shuffle_buffer:
+                        yield buf.pop(rng.randrange(len(buf)))
+                else:
+                    yield item
+
+        if rng is not None:
+            rng.shuffle(buf)
+        yield from buf
+
+    def __repr__(self) -> str:
+        return (f"Collection({len(self.manifest.members)} members, "
+                f"{len(self)} frames, {self.manifest.total_posed_frames} posed)")
+
+
+def _pose_fields(fr: container.Frame, member: Member, mi: int, li: int) -> dict:
+    item = {
+        "uri": member.uri,
+        "member": mi,
+        "frame": li,
+        "t": fr.t,
+        "camera": fr.camera,
+        "pose_valid": bool(fr.pose_valid),
+    }
+    if fr.pose_valid:
+        item["c2w"] = fr.c2w
+        item["q_wxyz"] = fr.q_wxyz
+        item["tr"] = fr.tr
+    return item
+
+
+def _wanted_signals(want: set[str], signals) -> list:
+    if "signals" in want:
+        return list(signals)
+    return [s for s in signals if s.id in want or (s.role == "depth" and "depth" in want)]
+
+
+def _fill_from_partial(item: dict, part: dict, signals, want: set[str]) -> None:
+    if "rgb" in want and part.get("rgb") is not None:
+        item["rgb"] = part["rgb"]
+    raw = part.get("signals") or {}
+    for s in _wanted_signals(want, signals):
+        codes = raw.get(s.id)
+        if codes is None:
+            continue
+        item[s.id if s.role != "depth" else "depth"] = s.apply(codes)
+
+
+def _fill_from_whole(item: dict, decoded: dict, seq, li: int, want: set[str]) -> None:
+    if "rgb" in want:
+        rgb = decoded.get("rgb")
+        if rgb is not None:
+            item["rgb"] = rgb[li]
+    for s in _wanted_signals(want, seq.signals):
+        codes = (decoded.get("signals") or {}).get(s.id)
+        if codes is None:
+            continue
+        item[s.id if s.role != "depth" else "depth"] = s.apply(codes[li])

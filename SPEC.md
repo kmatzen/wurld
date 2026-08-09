@@ -387,9 +387,8 @@ pixels or be separated from them in transit.
 **Belongs in one file**: a stereo pair, a phone's RGB + LiDAR + IMU, a robot's
 head assembly — sensors that are hardware- or tightly-synced, rigidly mounted,
 and jointly calibrated (the `rigs` block, §8.1, describes exactly this
-coupling). Multiple synchronized RGB streams for such a rig are a planned
-payload-layer extension (multi-RGB chromapakz tracks; until then a file carries
-one camera's pixels plus every camera's calibration).
+coupling). Multiple synchronized RGB streams for such a rig are stored as
+display streams keyed by camera id (§4.4).
 
 **Belongs in several files**: separate agents, clocks, or mountings — two
 robots covering one scene, external mocap alongside an egocentric camera,
@@ -399,9 +398,13 @@ transforms, estimated clock offsets), and a single container would force a
 merge between producers that are naturally separate processes on separate
 machines. Composition across files is a **scene manifest** concern — a
 lightweight sidecar listing member files, each with a world-frame alignment
-(SE(3)/Sim(3)) and a clock offset — reserved for a future revision. The
+(SE(3)/Sim(3)) and a clock offset — still reserved for a future revision. The
 layering mirrors USD composition over single assets: the container stays
 simple and atomic; the scene lives one level above.
+
+A **collection manifest** (§13) is a different sidecar and does not fill that
+role: it indexes many files as a dataset and asserts no spatial or temporal
+relationship between them at all.
 
 Two rules follow:
 
@@ -411,7 +414,7 @@ Two rules follow:
   track. It is technically legal (frames carry per-frame `camera` ids and
   equal timestamps are permitted), but it breaks plain-video playback,
   misrepresents the track's frame rate, and muddies Cluster-level random
-  access; multi-camera pixels should wait for multi-RGB tracks.
+  access. Use display streams (§4.4) instead.
 
 ## 12. Non-goals
 
@@ -422,3 +425,45 @@ Two rules follow:
 - Not a multi-agent scene format — one file is one rig on one clock (§11);
   cross-agent composition belongs to the future scene manifest, not the
   container.
+
+## 13. Collection manifest (v1.2)
+
+A **collection** indexes many wurld files as one dataset. It is a sidecar JSON
+document, not a container: every member remains an ordinary wurld file that
+plays and parses alone, and deleting the manifest loses only the index.
+
+This is deliberately **not** the scene manifest reserved in §11. A collection
+claims no spatial or temporal relationship between its members — no alignment,
+no clock offset, no shared world frame. Two members may be unrelated captures on
+opposite sides of the planet. A reader MUST NOT infer that member poses are
+comparable across files.
+
+```json
+{
+  "format": "wurld-collection",
+  "version": 1,
+  "description": "",
+  "totals": { "members": 2, "frames": 71, "posed_frames": 67 },
+  "members": [
+    { "uri": "captures/take00.wl.webm", "frames": 12, "posed_frames": 11,
+      "cameras": ["0"], "rgb_streams": ["rgb"], "signals": ["depth"],
+      "metric_scale": true, "t_start": 0.0, "t_end": 0.367,
+      "width": 64, "height": 48, "bytes": 25462, "sha256": null }
+  ]
+}
+```
+
+- `format` MUST be `"wurld-collection"`. A reader MUST reject other values.
+- `version` is the manifest schema version. A reader MUST reject a manifest whose
+  version exceeds what it understands, rather than guessing.
+- `uri` is a path relative to the manifest's directory, an absolute path, or an
+  `http(s)` URL. Relative paths keep a collection movable as a directory.
+- Every other member field is a **cache of what the member's own header says**.
+  The file is authoritative: a reader that needs a guarantee MUST read the
+  member. `sha256` is optional and absent unless requested, since computing it
+  requires reading every byte.
+- Member order defines the collection's frame ordering: global frame index `k`
+  is resolved by walking members in order and accumulating `frames`.
+- Members MAY disagree — different resolutions, cameras, signals, or
+  `metric_scale`. A consumer requiring homogeneity MUST filter; mixing scaled
+  and unscaled reconstructions is the hazard worth checking first.

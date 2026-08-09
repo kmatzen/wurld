@@ -23,6 +23,7 @@ dev = ["pytest>=8"]
 mcap = ["mcap>=1.0"]
 record3d = ["pyliblzfse>=0.4"]
 euroc = ["pyyaml>=6"]
+torch = ["torch>=2"]
 
 [tool.setuptools.packages.find]
 include = ["wurld*"]

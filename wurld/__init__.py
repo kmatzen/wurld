@@ -16,6 +16,7 @@ from .container import (
     write,
 )
 from .stream import StreamReader, StreamWriter
+from .collection import Collection, Manifest, Member, build_manifest, describe
 from . import conventions
 
 __version__ = "1.1.1"
@@ -33,4 +34,9 @@ __all__ = [
     "conventions",
     "StreamReader",
     "StreamWriter",
+    "Collection",
+    "Manifest",
+    "Member",
+    "build_manifest",
+    "describe",
 ]

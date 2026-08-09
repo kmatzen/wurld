@@ -84,6 +84,19 @@ def test_stereo_rig(tmp_path):
     assert "primary first" in stdout
 
 
+def test_collection_training(tmp_path):
+    stdout = _run("08_collection_training.py", tmp_path)
+    # The example verifies its own sharding and would exit 1 on a failure, but
+    # assert the conclusion is actually printed rather than trusting the code.
+    assert "0 duplicated, 0 missing" in stdout
+    assert "every frame exactly once" in stdout
+
+    from wurld import collection as col
+    c = col.Collection.read(tmp_path / "collection.json")
+    assert len(c.members) == 4
+    assert len(c) == c.manifest.total_frames > 0
+
+
 def test_hdr_exr_render(tmp_path):
     out = tmp_path / "hdr.wl.webm"
     stdout = _run("05_hdr_exr_render.py", out)

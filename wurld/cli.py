@@ -306,6 +306,54 @@ def _cmd_demo(args) -> int:
     return 0
 
 
+def _cmd_index(args) -> int:
+    from .collection import build_manifest
+
+    out = Path(args.out)
+    manifest, failures = build_manifest(
+        args.sources,
+        pattern=args.pattern,
+        checksum=args.checksum,
+        relative_to=None if args.absolute else out.resolve().parent,
+        on_error="skip" if args.skip_errors else "raise",
+        description=args.description,
+    )
+    manifest.write(out)
+    print(f"{out}: {len(manifest.members)} members, {manifest.total_frames} frames "
+          f"({manifest.total_posed_frames} posed)")
+    for uri, why in failures:
+        print(f"  skipped {uri}: {why}", file=sys.stderr)
+    # Unreadable members are a partial result, not a success.
+    return 1 if failures else 0
+
+
+def _cmd_collection(args) -> int:
+    from .collection import Collection
+
+    c = Collection.read(args.manifest)
+    m = c.manifest
+    print(f"{args.manifest}: {len(m.members)} members, {len(c)} frames "
+          f"({m.total_posed_frames} posed)")
+    if m.description:
+        print(f"  {m.description}")
+    cams = sorted({c for mem in m.members for c in mem.cameras})
+    sigs = sorted({s for mem in m.members for s in mem.signals})
+    sizes = sorted({(mem.width, mem.height) for mem in m.members})
+    scales = sorted({str(mem.metric_scale) for mem in m.members})
+    print(f"  cameras: {', '.join(cams) or '-'}")
+    print(f"  signals: {', '.join(sigs) or '-'}")
+    print(f"  resolutions: {', '.join(f'{w}x{h}' for w, h in sizes)}")
+    print(f"  metric_scale: {', '.join(scales)}")
+    if len(scales) > 1:
+        print("  warning: mixed metric_scale — consumers requiring metres must filter",
+              file=sys.stderr)
+    if args.members:
+        for i, mem in enumerate(m.members):
+            print(f"  [{i}] {mem.uri}  {mem.frames} frames ({mem.posed_frames} posed)"
+                  f"  {mem.width}x{mem.height}")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="wurld", description="Posed sensor video in one playable WebM")
     sub = p.add_subparsers(dest="command", required=True)
@@ -365,6 +413,26 @@ def main(argv=None) -> int:
     p_pt.add_argument("file")
     p_pt.add_argument("out")
     p_pt.set_defaults(func=_cmd_pose_track)
+
+    p_idx = sub.add_parser(
+        "index", help="build a collection manifest over many wurld files")
+    p_idx.add_argument("sources", nargs="+",
+                       help="files, directories (globbed recursively), or http(s) urls")
+    p_idx.add_argument("-o", "--out", default="collection.json", help="manifest path")
+    p_idx.add_argument("--pattern", default="*.wl.webm", help="glob used inside directories")
+    p_idx.add_argument("--checksum", action="store_true",
+                       help="record sha256 per member (reads every byte; slow)")
+    p_idx.add_argument("--absolute", action="store_true",
+                       help="store absolute paths instead of paths relative to the manifest")
+    p_idx.add_argument("--skip-errors", action="store_true",
+                       help="report unreadable members instead of failing")
+    p_idx.add_argument("--description", default="")
+    p_idx.set_defaults(func=_cmd_index)
+
+    p_cinfo = sub.add_parser("collection", help="summarize a collection manifest")
+    p_cinfo.add_argument("manifest")
+    p_cinfo.add_argument("--members", action="store_true", help="list every member")
+    p_cinfo.set_defaults(func=_cmd_collection)
 
     args = p.parse_args(argv)
     return args.func(args)

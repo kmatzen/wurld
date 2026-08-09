@@ -138,7 +138,7 @@ does not reach (binary pose tables and IMU streams) and what to do instead.
 — feed-forward reconstruction, splat and NeRF training, SLAM benchmarking, robot
 rigs, dataset distribution — maps each to the format, and is explicit about the
 cases where wurld is the wrong tool (multi-agent scenes, camera-less LiDAR
-sweeps, geospatial survey, non-rigid capture). Four scenarios ship as runnable,
+sweeps, geospatial survey, non-rigid capture). Seven scenarios ship as runnable,
 tested examples under `examples/`.
 
 It also carries the measured playback matrix and the HDR plans. In short: VLC,
@@ -146,6 +146,42 @@ Chrome and ffmpeg play these files and pick the right track; **QuickTime and iOS
 Photos cannot open them at all**, because AVFoundation has no WebM demuxer. That
 is a deliberate trade — VP9 lossless is what makes bit-exact depth possible —
 and desktop viewing is VLC or IINA.
+
+## Collections: a corpus as a dataset
+
+One file is one sequence; training is ten thousand of them. A **collection**
+(SPEC §13) is a manifest plus the files it names — a sidecar, not a new
+container, so every member stays an ordinary playable wurld file.
+
+```bash
+wurld index captures/ -o collection.json     # headers only; no pixels decoded
+wurld collection collection.json --members
+```
+
+```python
+from wurld import Collection
+c = Collection.read("collection.json")
+c.locate(12345)                  # global frame -> (member, frame within it)
+for item in c.iter_frames(fields=("rgb", "depth"), shard=(0, 4), shuffle=7):
+    ...
+```
+
+Indexing reads each member's header and stops at the first Cluster: a file with
+100x the pixels of another, at the same frame count, indexes for the same ~8 KiB.
+Sharding keeps whole files together so each member decodes once, and yields every
+frame exactly once — asserted across ranks x DataLoader workers, because a bad
+split does not crash, it quietly trains on duplicates.
+
+With PyTorch (`pip install 'wurld[torch]'`):
+
+```python
+from wurld.integrations.torch_data import WurldIterableDataset
+ds = WurldIterableDataset("collection.json", fields=("rgb", "depth"))
+loader = DataLoader(ds, batch_size=8, num_workers=4)     # shards itself
+```
+
+A collection asserts nothing about how members relate in space or time; that is
+the separate scene-manifest concern reserved in SPEC §11.
 
 ## Layout
 
@@ -155,6 +191,8 @@ and desktop viewing is VLC or IINA.
 - `tests/` — round-trip suite (`pytest`): bit-exact depth, pose fidelity, converter
   round trips, COLMAP binary parsing, validation errors
 - `viewer/` — single-file browser viewer
+- `wurld/collection.py` — manifests, global indexing, sharded streaming
+- `wurld/integrations/` — nerfstudio DataParser, PyTorch datasets
 - `examples/` — runnable scenario walkthroughs (see USE_CASES.md)
 - `LANDSCAPE.md` — the market research that motivated this project
 - `USE_CASES.md` — pipelines, scenarios, and the format's limits

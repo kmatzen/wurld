@@ -8,7 +8,7 @@ whether wurld helps, and how. It ends with the cases where it does not.
 **On the evidence here.** The pipeline survey cites sources for each area
 surveyed; claims about this repository's own behaviour are verifiable by reading
 the code or running the examples. Where something rests on working knowledge
-rather than a citation it says so. Six scenarios ship as runnable examples under
+rather than a citation it says so. Seven scenarios ship as runnable examples under
 `examples/`, marked ▶; the rest are analysis, not demonstrations.
 
 ---
@@ -195,7 +195,40 @@ Tested against a fixture in the ASL layout with the genuine V1_01 calibration
 (`tests/test_euroc.py`), including a check that would fail if the T_BS
 composition were dropped. It has not been run against the real download.
 
-### 7. Robot-learning episodes
+### ▶ 7. A corpus as a training set — `examples/08_collection_training.py`
+
+One file is one sequence; training is ten thousand of them. A **collection** is a
+manifest plus the files it names (SPEC §13) — deliberately not a new container,
+so every member stays an ordinary playable wurld file and un-building the dataset
+is a delete.
+
+What it buys, in order of how much it matters:
+
+- **Indexing costs headers, not pixels.** Members are described by a read that
+  stops at the first Cluster. Measured: a file with 100× the pixels of another,
+  at the same frame count, indexes for the same ~8 KiB. Cataloguing a corpus does
+  not decode it.
+- **Global frame addressing.** N files behave as one indexed sequence, resolved
+  by bisection over cumulative counts.
+- **Sharding that keeps whole files together.** A worker that opens a member uses
+  all of it, so each member decodes once.
+
+The sharding is the part worth being paranoid about, and the tests are written
+that way: a bad split does not crash, it silently trains on duplicated frames at
+the wrong weight while the loss curve looks healthy. Every iteration path asserts
+that shards are disjoint and their union is complete, across ranks × DataLoader
+workers, with a real `DataLoader(num_workers>0)`.
+
+`wurld.integrations.torch_data` provides `WurldIterableDataset` (streaming, shards
+itself across workers and distributed ranks) and `WurldFrameDataset` (map-style,
+for evaluation — slower per sample because a random index still costs a cluster
+decode).
+
+A collection asserts *nothing* about how members relate in space or time. That is
+the separate scene-manifest concern reserved in SPEC §11, and conflating the two
+would invite a reader to compare poses across unrelated captures.
+
+### 8. Robot-learning episodes
 
 LeRobot v3 stores vision as MP4 and state/action as Parquet. wurld is
 complementary rather than competing: it is the *camera-centric* part — posed
@@ -204,7 +237,7 @@ per episode alongside the Parquet keeps depth and calibration together instead
 of scattering them, and the depth stays lossless. Not demonstrated here; the
 integration exists as a staged PR against LeRobot's depth backend.
 
-### 8. Licensing is a first-class constraint on corpus building
+### 9. Licensing is a first-class constraint on corpus building
 
 Not a format feature, but the thing that actually decides what a corpus can
 contain, and easy to get wrong. The indoor RGBD datasets differ sharply:
@@ -222,27 +255,34 @@ conversion recipe plus a checksum instead of a mirror. This repository's TUM
 conversion is verified bit-exact against the source PNGs, which is what makes
 republishing it defensible.
 
-### 9. Dataset distribution and streaming
+### 10. Dataset distribution and streaming
 
 The header carries every pose in one contiguous region, so a client can read
 calibration and the full trajectory in two range requests without touching
 video. That is what makes "index 10,000 files' trajectories" cheap. Verified
 against GitHub Pages and Hugging Face, both of which return HTTP 206.
 
-### 10. Inspection and triage
+That capability is now spent on something: collections (scenario 7, SPEC §13)
+build a manifest from exactly those header reads, so a corpus catalogues without
+decoding. What wurld still does *not* do is repack members into shards — a
+collection points at files where they already are. For tar-shard sequential
+throughput at cluster scale, WebDataset remains the better tool, and pointing a
+collection at extracted members is the sane interop path.
+
+### 11. Inspection and triage
 
 Open the file in a browser and look at it: [kmatzen.com/wurld](https://kmatzen.com/wurld/).
 Or read it with tools nobody here controls — `ffprobe` prints the metadata
 document, and poses come out of the WebVTT track with plain ffmpeg. See
 [EXTRACTING.md](EXTRACTING.md).
 
-### 11. Simulation-to-real comparison
+### 12. Simulation-to-real comparison
 
 Synthetic and captured sequences in one format means a pipeline consumes both
 without branching. `world.metric_scale` and `gravity_in_world` carry the
 distinctions that actually differ. Not demonstrated.
 
-### 12. Long-horizon capture and archival
+### 13. Long-horizon capture and archival
 
 Bounded-memory iteration (`iter_frames`), cluster-level random access, and a
 crash-safe streaming layout — a recording that dies mid-take is still valid and
