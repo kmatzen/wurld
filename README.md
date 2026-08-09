@@ -355,12 +355,26 @@ the separate scene-manifest concern reserved in SPEC §11.
 
 ## Status / verified
 
-- 29/29 tests pass: depth round-trips bit-exactly through VP9; poses, timestamps, and
-  intrinsics survive every converter round trip; TUM native-unit depth is bit-exact
-  end to end; binary frame tables, rigs, IMU streams, and both Stray resampling
-  policies covered.
-- `ffmpeg`/`ffprobe` read and fully decode wurld files with zero warnings (all
-  three VP9 streams); the WURLD tags are invisible to standard demuxers.
+- **279 Python tests, 13 JavaScript, 11 C++ unit checks**, green on Linux and
+  macOS. Depth round-trips bit-exactly through VP9; poses, timestamps and
+  intrinsics survive every converter round trip; binary frame tables, rigs, IMU
+  streams and both Stray resampling policies are covered.
+- **Three readers agree** on a shared conformance corpus whose expectations are
+  generated from intent rather than captured from any one of them
+  (`conformance/`), so Python, JavaScript and C++ cannot drift apart quietly.
+- **Checked against real downloads, not only fixtures**: TUM `freiburg1_desk`
+  (572/573 poses at 0.000000000 mm, depth within 2e-3 of the source PNGs) and
+  EuRoC `V1_01_easy` (poses recomputed independently from the raw ground-truth
+  csv agree to 3.2e-13; stereo baseline 11.01 cm from the real calibration).
+- **Every exporter against every shape of legal file** — unposed frames, no
+  display track, stereo, HDR — must succeed or refuse with a reason, never an
+  internal error (`tests/test_export_matrix.py`).
+- `ffmpeg`/`ffprobe` read and fully decode wurld files with zero warnings —
+  three VP9 tracks for a mono capture, four for a stereo one. `ffprobe` surfaces
+  the `WURLD` document itself as a format tag, so calibration and conventions
+  are readable with no wurld install; only the binary pose table and IMU are
+  invisible, because ffmpeg's Matroska demuxer drops `TagBinary`
+  (see [EXTRACTING.md](EXTRACTING.md)).
 - Viewer verified in Chrome (native WebCodecs decode, no WASM), including binary
   frame tables.
 
@@ -370,8 +384,7 @@ SPEC declared **1.0** (frozen semantics; 1.x additions are additive-only, and
 §11 codifies file scope: one rig, one clock). chromapakz pinned to the released
 **0.4.0** — no more git installs. LICENSE (MIT), CHANGELOG, CI (Python 3.11/3.13
 on Linux+macOS plus a viewer parity job), and packaging validated (sdist+wheel
-build clean, twine-checked, fresh-venv install + CLI smoke). Multi-RGB pixel
-storage remains gated on the ChromaPakZ #47 design review; phone importers and
+build clean, twine-checked, fresh-venv install + CLI smoke). Phone importers (Stray, Polycam, Record3D) and
 WurldCam remain fixture/harness-validated pending a real capture. TUM is the
 exception and is checked against the real download by `tests/test_real_tum.py`
 (`scripts/fetch_tum.sh` fetches it; the test skips without it, and a weekly CI
