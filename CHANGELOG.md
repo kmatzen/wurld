@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **EXTRACTING.md told readers to pull depth from `0:v:1`.** That is
+  `signal-depth-hi` on a plain RGB+depth file, the *second camera's colour* on a
+  stereo capture, and something else again when a file carries confidence.
+  Nothing errors — the colour plane dequantizes into plausible nonsense. The
+  recipe now resolves planes by track title, and `tests/test_extracting_doc.py`
+  executes it against both a mono and a stereo file, checking the result matches
+  the Python reader (1.2e-07 m, identical NaN pattern).
+
 ## 1.3.0 — 2026-08-09
 
 Streaming: sequences that did not fit in memory now convert, in Python and in

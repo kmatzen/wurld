@@ -134,9 +134,27 @@ triangle fold (the low plane is reversed on odd high values, which keeps it
 smooth and so compressible). Reconstruct the code, then dequantize with the
 `value_map` from the metadata.
 
+**Select the planes by title, not by index.** Track numbering is not fixed:
+`0:v:1` is `signal-depth-hi` on a plain RGB+depth file, but on a stereo capture
+it is the *second camera's colour*, and on a file that also carries confidence
+the depth planes sit elsewhere again. Nothing errors — you get a colour plane
+reinterpreted as depth codes, which dequantizes into plausible nonsense.
+
 ```sh
-ffmpeg -v error -i "$F" -map 0:v:1 -frames:v 1 -pix_fmt gray -f rawvideo hi.raw -y
-ffmpeg -v error -i "$F" -map 0:v:2 -frames:v 1 -pix_fmt gray -f rawvideo lo.raw -y
+# What this file actually carries, in order:
+ffprobe -v error -show_entries stream=index:stream_tags=title -of csv=p=0 "$F"
+# 0,rgb
+# 1,rgb-cam1            <- a stereo capture; not present on a mono one
+# 2,signal-depth-hi
+# 3,signal-depth-lo
+
+hi=$(ffprobe -v error -show_entries stream=index:stream_tags=title -of csv=p=0 "$F" \
+     | awk -F, '$2=="signal-depth-hi"{print $1}')
+lo=$(ffprobe -v error -show_entries stream=index:stream_tags=title -of csv=p=0 "$F" \
+     | awk -F, '$2=="signal-depth-lo"{print $1}')
+
+ffmpeg -v error -i "$F" -map 0:"$hi" -frames:v 1 -pix_fmt gray -f rawvideo hi.raw -y
+ffmpeg -v error -i "$F" -map 0:"$lo" -frames:v 1 -pix_fmt gray -f rawvideo lo.raw -y
 ```
 
 Use `-pix_fmt gray -f rawvideo`, not PNG: it avoids any colourspace conversion
