@@ -4,6 +4,14 @@
 representations, geospatial/point clouds, capture/sensor data, AI/world models, and
 web/engine delivery. Full raw findings summarized here; links preserved.*
 
+> **Status: this is the decision record, not a live survey.** Recommendation #1 was
+> taken and built — it is [wurld](README.md). Milestones 1–3 have shipped and 4 is
+> partly done; see [What shipping it taught](#what-shipping-it-taught) at the end for
+> the places measurement contradicted the analysis below. The survey sections are left
+> as written in August 2026 and have **not** been re-run; treat them as a snapshot.
+> Current thinking about pipelines and scenarios lives in [USE_CASES.md](USE_CASES.md),
+> which supersedes §4–5 here on the producer side.
+
 ## The one-paragraph thesis
 
 Spatial data lives in roughly six mutually incompatible layers — capture containers,
@@ -195,3 +203,75 @@ First four shippable milestones, each independently valuable:
 3. The browser demo: seekable posed-RGBD scrubber with live point-cloud reprojection
    (WebCodecs + WebGPU).
 4. Ecosystem PRs: LeRobot depth backend (#1144), nerfstudio dataparser, Foxglove schema.
+
+---
+
+## What shipping it taught
+
+Recommendation #1 was built. This section records where the analysis above held and
+where measurement contradicted it — the survey is left unedited, so this is the diff.
+
+### The milestones
+
+1. **Spec + reference implementation + validator** — shipped. `SPEC.md`, Python and JS
+   readers, `wurld validate` for conformance, parsers fuzzed.
+2. **Converters** — shipped, seven layouts: COLMAP, `transforms.json`, TUM, EuRoC,
+   Record3D, Polycam, Stray. TUM round-trip verified against the real `freiburg1_desk`
+   sequence: 572/573 poses associated within 10 ms at **0.000 mm** translation error,
+   depth bit-exact against the source PNGs.
+3. **Browser demo** — shipped and hosted: seekable posed-RGBD playback with per-frame
+   point-cloud reprojection, plus a camera picker for multi-stream files and exports
+   for the pieces ffmpeg cannot reach.
+4. **Ecosystem PRs** — partial. nerfstudio dataparser and MCAP/Foxglove export shipped;
+   the LeRobot depth backend is written but held private; **no ffmpeg demuxer**, which
+   remains the largest unbuilt wedge. `EXTRACTING.md` plus a WebVTT pose track were the
+   pragmatic substitute — they make the data reachable from stock ffmpeg without one.
+
+### Where the analysis was wrong, or too kind
+
+- **"Ordinary-player-compatible" cost more than this document admits.** The parenthetical
+  "(Matroska/WebM profile or ISOBMFF tracks)" treats the choice as a detail. It is not:
+  WebM was the only container meeting the requirements, and **AVFoundation has no WebM
+  demuxer**, so QuickTime Player, iOS Photos and Quick Look cannot open a wurld file at
+  all — measured, not assumed. ffmpeg, VLC, IINA and Chrome all play them. On Apple
+  platforms "ordinary player" means VLC or IINA, and that is a real adoption tax the
+  survey did not price.
+- **Lossless 16-bit-in-video is not a universal win.** §4 is right that labs ship
+  millions of 16-bit PNGs and that depth is chromapakz's function. But the same
+  reasoning applied to HDR radiance fails: measured against EXR/ZIP, a coherent denoised
+  render compresses **13.5× smaller**, a moving camera **1.5×**, and raw path-traced
+  output with independent per-frame Monte Carlo noise **0.8× — larger than EXR**.
+  Lossless coding of fresh noise costs more than zlib. The win is temporal coherence,
+  not the codec, and a survey claim of the form "video beats per-frame formats" needs
+  that qualifier.
+- **The 10-bit WebCodecs limitation bit exactly as predicted.** §6 flagged it; the
+  hosted viewer now carries an HDR10 display track it cannot colour-decode, and says so
+  in the UI rather than showing wrong pixels. Chrome renders the same file correctly
+  through `<video>`. Chrome and IINA both honour the PQ transfer function — verified by
+  an A/B of two files with byte-identical pixels differing only in colour tag.
+- **§4–5 predate feed-forward reconstruction as a bulk producer.** DUSt3R, MASt3R and
+  VGGT emit dense geometry *and* camera parameters in one forward pass, which changes
+  the producer population from "capture apps and SLAM systems" to "models, at scale,
+  with per-pixel confidence, frequent localisation failure, and usually no metric
+  scale". That drove three format features — `pose_valid=False`, confidence as a
+  first-class signal, `metric_scale=False` — and is covered properly in USE_CASES.md
+  Part 1 rather than here.
+
+### Where it held
+
+- **No incumbent appeared.** Nothing has claimed posed sensor video in the interval.
+- **The convention bug class is real.** Fixing RDF axes, camera-to-world direction and
+  `wxyz` order in the spec, and validating them, removed a category of error rather
+  than an instance — the axis-flip assertion in the splat example exists because a
+  silent flip trains a mirrored model and nothing downstream catches it.
+- **Converters really do the marketing**, as predicted: they are how a file gets out of
+  a per-app layout, and the recipe is the adoption path.
+- **#4 (MV-HEVC / stereo) pairs with #1 as expected.** Multi-camera display streams
+  landed, so both eyes of a stereo rig ride one file bound to calibration by camera id.
+
+### What this document should not be used for
+
+It scored gaps against a builder with no shipped container. That premise is gone. Any
+next-project decision — #2, the 4D splat codec, most obviously, with the MPEG CfP
+deadline of January 2027 still standing — should be re-argued from the current position,
+not read off the ranking above.
