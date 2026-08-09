@@ -191,7 +191,13 @@ def to_colmap(wl_path: str | Path, out_dir: str | Path, write_images: bool = Tru
                 seq.rgb_streams[0])
         require_8bit_pixels(seq, 'a COLMAP workspace')
         rgb = seq.rgb
-    for n, f in enumerate(seq.frames, start=1):
+        if rgb is None:
+            raise ValueError(
+                f"{wl_path} has no display track; pass write_images=False to "
+                "export the model without them.")
+    posed = [f for f in seq.frames if f.pose_valid]
+    skipped = len(seq.frames) - len(posed)
+    for n, f in enumerate(posed, start=1):
         name = f"frame_{f.i:06d}.png"
         w2c = conventions.invert_pose(f.c2w)
         q, t = conventions.matrix_to_pose(w2c)
@@ -203,4 +209,8 @@ def to_colmap(wl_path: str | Path, out_dir: str | Path, write_images: bool = Tru
             Image.fromarray(np.asarray(rgb[f.i])[..., :3]).save(img_dir / name)
     (base / "images.txt").write_text("\n".join(lines) + "\n")
     (base / "points3D.txt").write_text("# empty\n")
+    if skipped:
+        logging.getLogger(__name__).warning(
+            "%s: %d frame(s) had no pose and are absent from the model",
+            wl_path, skipped)
     return out

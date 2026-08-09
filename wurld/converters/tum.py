@@ -150,6 +150,10 @@ def to_tum(wl_path: str | Path, out_dir: str | Path) -> Path:
             seq.rgb_streams[0])
     require_8bit_pixels(seq, 'TUM RGB-D')
     rgb = seq.rgb
+    if rgb is None:
+        raise ValueError(
+            f"{wl_path} has no display track, and a TUM directory is rgb/ plus "
+            "depth/. A signals-only file has no images to write.")
     depth_meta = seq.signal_meta("depth")
     depth_raw = seq.signal(depth_meta.id) if depth_meta else None
     if depth_raw is not None:

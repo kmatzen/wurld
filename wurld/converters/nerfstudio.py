@@ -109,6 +109,11 @@ def to_transforms(wl_path: str | Path, out_dir: str | Path) -> Path:
             seq.rgb_streams[0])
     require_8bit_pixels(seq, 'a nerfstudio transforms.json export')
     rgb = seq.rgb
+    if rgb is None:
+        raise ValueError(
+            f"{wl_path} has no display track, and transforms.json indexes images. "
+            "A signals-only file (depth or scene-referred HDR with rgb=None) has "
+            "nothing to export here.")
     depth_meta = seq.signal_meta("depth")
     depth_raw = seq.signal(depth_meta.id) if depth_meta else None
     if depth_raw is not None:
@@ -127,7 +132,15 @@ def to_transforms(wl_path: str | Path, out_dir: str | Path) -> Path:
     if cam.model == "OPENCV":
         doc["k1"], doc["k2"], doc["p1"], doc["p2"] = cam.params[4:8]
 
+    skipped = 0
     for f in seq.frames:
+        if not f.pose_valid:
+            # transforms.json is a list of posed views: a frame the producer
+            # could not localise is not a member of it. Dropping it is right;
+            # crashing on it stopped feed-forward output from reaching a trainer
+            # at all, which is the one pipeline this export exists for.
+            skipped += 1
+            continue
         name = f"images/frame_{f.i:06d}.png"
         Image.fromarray(np.asarray(rgb[f.i])[..., :3]).save(out / name)
         entry = {
@@ -149,4 +162,8 @@ def to_transforms(wl_path: str | Path, out_dir: str | Path) -> Path:
         doc["frames"].append(entry)
 
     (out / "transforms.json").write_text(json.dumps(doc, indent=2))
+    if skipped:
+        logging.getLogger(__name__).warning(
+            "%s: %d frame(s) had no pose and are absent from transforms.json",
+            wl_path, skipped)
     return out

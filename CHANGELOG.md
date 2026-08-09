@@ -62,6 +62,15 @@ pull-based and never had the defect.
   rig, so a stereo pair keeps its calibrated baseline (measured on real EuRoC:
   11.01 cm, constant to four decimals). Found by exporting a real stereo
   sequence and noticing only one `image_raw` topic came out.
+- **Feed-forward output could not be exported to nerfstudio or COLMAP at all.**
+  Both raised "frame 9: pose not valid" on the unlocalised frames that
+  `pose_valid=False` exists to represent — so scenario 1 could not feed scenario
+  2, the two pipelines the format most wants to connect. Unposed frames are now
+  omitted (a pose-indexed format has no place for them) and the count is warned
+  rather than dropped in silence.
+- **A signals-only file (`rgb=None`, legal for scene-referred HDR) died with
+  "'NoneType' object is not subscriptable"** in all three image exporters. They
+  now say the file has no display track and what that means for the format.
 - **Exporting an HDR file to TUM, COLMAP or nerfstudio died in PIL** with
   "Cannot handle this data type: (1, 1, 3), <u2", which names neither the file
   nor the format nor a way out. It now refuses with all three: those formats

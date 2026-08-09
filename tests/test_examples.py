@@ -138,3 +138,48 @@ def test_robot_rig_and_imu(tmp_path):
     assert abs(baseline - 0.12) < 1e-4
     # IMU stays at its own rate rather than being resampled to the frame rate.
     assert seq.imu["imu0"].samples.shape[0] > len(seq.frames) * 5
+
+
+def _exporters():
+    from wurld.converters import colmap, nerfstudio, tum
+    return [("tum", tum.to_tum), ("nerfstudio", nerfstudio.to_transforms),
+            ("colmap", colmap.to_colmap)]
+
+
+def test_feedforward_output_can_reach_every_exporter(tmp_path, caplog):
+    """Scenario 1 must be able to feed scenario 2.
+
+    A feed-forward pass leaves frames it could not localise, and exporting those
+    used to raise "frame 9: pose not valid" from nerfstudio and COLMAP — so the
+    format's flagship producer could not reach its flagship consumer.
+    """
+    import logging
+
+    src = tmp_path / "ff.wl.webm"
+    _run("01_feedforward_reconstruction.py", src)
+    seq = wl.read(src)
+    unposed = sum(1 for f in seq.frames if not f.pose_valid)
+    assert unposed > 0, "the fixture must contain unposed frames"
+
+    for name, fn in _exporters():
+        with caplog.at_level(logging.WARNING):
+            fn(src, tmp_path / f"out_{name}")
+
+    # transforms.json must contain the posed frames and only those.
+    import json
+    doc = json.loads((tmp_path / "out_nerfstudio" / "transforms.json").read_text())
+    assert len(doc["frames"]) == len(seq.frames) - unposed
+    # And the drop must be reported, not silent.
+    assert any("had no pose" in r.getMessage() for r in caplog.records)
+
+
+def test_a_signals_only_file_is_refused_with_a_reason(tmp_path):
+    """rgb=None is legal (scene-referred HDR); 'NoneType is not subscriptable' is not."""
+    src = tmp_path / "norgb.wl.webm"
+    _run("05_hdr_exr_render.py", src)
+    assert wl.read(src).rgb is None
+
+    for name, fn in _exporters():
+        with pytest.raises(ValueError) as exc:
+            fn(src, tmp_path / f"none_{name}")
+        assert "no display track" in str(exc.value), name
