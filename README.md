@@ -305,7 +305,7 @@ the separate scene-manifest concern reserved in SPEC §11.
 
 ## Layout
 
-- `SPEC.md` — the format (v0.1)
+- `SPEC.md` — the format (v1.2)
 - `wurld/` — Python reference implementation (container, conventions, EBML tag
   layer, converters, CLI, synthetic test scene)
 - `tests/` — round-trip suite (`pytest`): bit-exact depth, pose fidelity, converter
