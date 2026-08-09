@@ -1,0 +1,76 @@
+{
+  "format": "wurld-conformance",
+  "version": 1,
+  "vectors": [
+    {
+      "name": "v01_minimal",
+      "file": "v01_minimal.wl.webm",
+      "expected": "v01_minimal.expected.json",
+      "description": "Poses and calibration only: no signals, no pixels beyond the RGB track.",
+      "bytes": 1480
+    },
+    {
+      "name": "v02_depth",
+      "file": "v02_depth.wl.webm",
+      "expected": "v02_depth.expected.json",
+      "description": "The common case: inverse-depth signal beside the display track.",
+      "bytes": 2737
+    },
+    {
+      "name": "v03_binary_frames",
+      "file": "v03_binary_frames.wl.webm",
+      "expected": "v03_binary_frames.expected.json",
+      "description": "Poses in the binary table \u2014 the form ffmpeg cannot see at all.",
+      "bytes": 1467
+    },
+    {
+      "name": "v04_unposed",
+      "file": "v04_unposed.wl.webm",
+      "expected": "v04_unposed.expected.json",
+      "description": "Frames the producer could not localise, in both storage forms.",
+      "bytes": 1468
+    },
+    {
+      "name": "v05_stereo",
+      "file": "v05_stereo.wl.webm",
+      "expected": "v05_stereo.expected.json",
+      "description": "Two display streams keyed by camera id (SPEC \u00a74.4).",
+      "bytes": 3249
+    },
+    {
+      "name": "v06_rig_imu",
+      "file": "v06_rig_imu.wl.webm",
+      "expected": "v06_rig_imu.expected.json",
+      "description": "Rig extrinsics plus an IMU at its own rate.",
+      "bytes": 2687
+    },
+    {
+      "name": "v07_camera_models",
+      "file": "v07_camera_models.wl.webm",
+      "expected": "v07_camera_models.expected.json",
+      "description": "A distorted camera model: OPENCV with eight parameters, not PINHOLE.",
+      "bytes": 1468
+    },
+    {
+      "name": "v08_float16_signal",
+      "file": "v08_float16_signal.wl.webm",
+      "expected": "v08_float16_signal.expected.json",
+      "description": "A float16_bits signal (SPEC \u00a76.1): the codes *are* the floats.",
+      "bytes": 1530
+    },
+    {
+      "name": "v09_awkward_strings",
+      "file": "v09_awkward_strings.wl.webm",
+      "expected": "v09_awkward_strings.expected.json",
+      "description": "Unicode and escapes in the document, where a JSON parser earns its keep.",
+      "bytes": 1456
+    },
+    {
+      "name": "v10_single_frame",
+      "file": "v10_single_frame.wl.webm",
+      "expected": "v10_single_frame.expected.json",
+      "description": "One frame. Off-by-one handling in a reader shows up here first.",
+      "bytes": 1040
+    }
+  ]
+}

@@ -49,6 +49,11 @@ jobs:
           ./cpp/build/wurld_test
       - name: Cross-implementation parity against the Python reader
         run: pytest tests/test_cpp_reader.py -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Conformance corpus across all three readers
+        run: pytest tests/test_conformance.py -q
 
   viewer-node:
     runs-on: ubuntu-latest

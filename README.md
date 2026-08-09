@@ -147,6 +147,23 @@ Photos cannot open them at all**, because AVFoundation has no WebM demuxer. That
 is a deliberate trade — VP9 lossless is what makes bit-exact depth possible —
 and desktop viewing is VLC or IINA.
 
+## Conformance corpus
+
+Three readers — Python, JavaScript, C++ — is three chances to disagree.
+`conformance/vectors/` is 88 KiB of small files paired with the parse a reader
+must produce, and one harness judges all three against it:
+
+```bash
+pytest tests/test_conformance.py     # python, javascript and c++
+```
+
+Expectations are generated from intent rather than captured from a reader
+(`conformance/generate.py`), so the corpus cannot enshrine a bug all three
+happen to share — which a golden file dumped from the Python reader would.
+The vectors cover JSON and binary pose tables, unposed frames, stereo streams,
+rigs, IMU, distorted camera models, `float16_bits`, unicode, and a single-frame
+file. If you write a fourth reader, this is the definition of correct.
+
 ## C++ reader
 
 `cpp/include/wurld.hpp` is a single-header C++17 reader with **no dependencies**
@@ -178,7 +195,7 @@ cmake -S cpp -B cpp/build && cmake --build cpp/build
 ## Collections: a corpus as a dataset
 
 One file is one sequence; training is ten thousand of them. A **collection**
-(SPEC §13) is a manifest plus the files it names — a sidecar, not a new
+(SPEC §14) is a manifest plus the files it names — a sidecar, not a new
 container, so every member stays an ordinary playable wurld file.
 
 ```bash
@@ -220,6 +237,7 @@ the separate scene-manifest concern reserved in SPEC §11.
   round trips, COLMAP binary parsing, validation errors
 - `viewer/` — single-file browser viewer
 - `cpp/` — dependency-free single-header C++17 metadata reader + `wurld_info`
+- `conformance/` — cross-implementation test vectors and their generator
 - `wurld/collection.py` — manifests, global indexing, sharded streaming
 - `wurld/integrations/` — nerfstudio DataParser, PyTorch datasets
 - `examples/` — runnable scenario walkthroughs (see USE_CASES.md)

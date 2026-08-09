@@ -198,7 +198,7 @@ composition were dropped. It has not been run against the real download.
 ### ▶ 7. A corpus as a training set — `examples/08_collection_training.py`
 
 One file is one sequence; training is ten thousand of them. A **collection** is a
-manifest plus the files it names (SPEC §13) — deliberately not a new container,
+manifest plus the files it names (SPEC §14) — deliberately not a new container,
 so every member stays an ordinary playable wurld file and un-building the dataset
 is a delete.
 
@@ -262,7 +262,7 @@ calibration and the full trajectory in two range requests without touching
 video. That is what makes "index 10,000 files' trajectories" cheap. Verified
 against GitHub Pages and Hugging Face, both of which return HTTP 206.
 
-That capability is now spent on something: collections (scenario 7, SPEC §13)
+That capability is now spent on something: collections (scenario 7, SPEC §14)
 build a manifest from exactly those header reads, so a corpus catalogues without
 decoding. What wurld still does *not* do is repack members into shards — a
 collection points at files where they already are. For tar-shard sequential

@@ -33,6 +33,8 @@
   "main": "./viewer/wurld.js",
   "files": [
     "viewer/wurld.js",
+    "conformance/vectors/",
+    "conformance/run_js.mjs",
     "SPEC.md",
     "README.md",
     "LICENSE"

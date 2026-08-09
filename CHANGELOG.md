@@ -16,6 +16,16 @@
   intrinsics apply. `Sequence.rgb_streams` / `rgb_for(id)` read them. Poses stay
   single-camera with rig-derived siblings; a lone stream keeps the conventional
   id `rgb` and binds implicitly, so existing files are unaffected.
+- **Conformance corpus** (`conformance/`) — small vectors plus the parse a
+  reader must produce, checked against the Python, JavaScript and C++ readers by
+  one harness. Expectations are generated from intent rather than captured from
+  a reader, so the corpus cannot enshrine a shared bug. Ships in the npm package
+  so a JS consumer can verify their own build.
+- **`readDocument` / `resolvePoses` / `readImuStreams` in `wurld-core`** — the
+  SPEC §9 pose-precedence chain now lives in the published JS library rather
+  than only in the viewer page. Anyone installing the package previously had to
+  reimplement it, and getting it wrong means a phone recording reads as zero
+  poses — which is exactly the bug the viewer once shipped.
 - **C++ reader** (`cpp/include/wurld.hpp`) — single-header C++17, zero
   dependencies, reading calibration, poses, timestamps, signals, rigs and IMU.
   Deliberately does not decode pixels: that needs libvpx and chromapakz, and the
@@ -23,7 +33,7 @@
   points at the pixels for consumers that want them. Traversal seeks over
   payloads, so file size does not drive I/O. Checked against the Python reader
   field-by-field rather than against its own expectations.
-- **Collections (SPEC §13)** — many wurld files as one dataset. `wurld index`
+- **Collections (SPEC §14)** — many wurld files as one dataset. `wurld index`
   builds a manifest; `Collection` gives global frame addressing across members
   and sharded streaming. Indexing reads headers only: a file with 100x the
   pixels of another, at the same frame count, indexes for the same ~8 KiB.
@@ -59,6 +69,10 @@ Denoise before archiving.
 
 ### Changed
 
+- **JS `unpackFrames` validates like the other readers.** A buffer length that
+  is not a whole number of records, or a camera index with no camera behind it,
+  now raises instead of yielding a frame whose camera is `undefined`. Found by
+  the conformance work: Python and C++ already rejected both.
 - **EuRoC importer carries both eyes.** cam0 and cam1 ship as display streams
   keyed by camera id, now that multi-stream exists; `--mono` (or `stereo=False`)
   restores the previous single-track output, which is byte-identical in layout —

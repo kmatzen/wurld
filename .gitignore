@@ -22,6 +22,9 @@ ios/.native-build/
 
 # hosted demo sample is intentionally tracked
 !docs/samples/*.webm
+# The conformance corpus is the shared definition of correct across the
+# Python, JS and C++ readers, so the vectors must be committed, not generated.
+!conformance/vectors/*.webm
 
 # the pinned chromapakz clone build-native.sh makes
 ios/.native-build/

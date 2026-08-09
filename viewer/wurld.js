@@ -199,6 +199,82 @@ function collectTags(b, start, end, out, dec = new TextDecoder()) {
 
 // ---------- frame records (SPEC §7): 45 bytes LE ----------
 /** IMU record (SPEC §8.3): 32 bytes LE — f64 t, 3xf32 gyro, 3xf32 accel. */
+/**
+ * Read a whole wurld file's metadata: the document with poses resolved.
+ *
+ * Pose precedence (SPEC §9): the consolidated WURLD_FRAMES table, else the
+ * concatenated WURLD_POSES chunks, else the JSON array. `frames_binary` is a
+ * descriptor, not a precondition — a streaming writer emits the table without
+ * one, and camera indices then resolve against sorted camera keys.
+ *
+ * This lives here rather than in the viewer because it is the chain every
+ * consumer needs and the one most likely to be got wrong: a reader that only
+ * honours the JSON array silently sees zero poses on a phone recording.
+ */
+export function readDocument(bytes) {
+  const tags = readWurldTags(bytes);
+  if (typeof tags.WURLD !== 'string') throw new Error('no WURLD tag (not a wurld file)');
+  const doc = JSON.parse(tags.WURLD);
+  if (doc.format !== 'wurld') {
+    throw new Error(`WURLD tag present but format=${JSON.stringify(doc.format)}`);
+  }
+  resolvePoses(doc, tags);
+
+  // IMU streams are declared in the document and carried as binary tags.
+  const imu = readImuStreams(doc, tags);
+
+  const cpz = typeof tags.CHROMAPAKZ === 'string' ? JSON.parse(tags.CHROMAPAKZ) : {};
+  return {
+    doc,
+    tags,
+    imu,
+    video: cpz,
+    rgbStreams: (cpz.rgbs ?? []).map(r => r.id).filter(Boolean),
+    hdr: (cpz.rgbs ?? []).map(r => r.hdr).find(Boolean) ?? null,
+  };
+}
+
+/**
+ * Resolve `doc.frames` from whichever pose representation the file uses.
+ *
+ * Separate from readDocument because callers that already hold tags — a viewer
+ * doing ranged reads, say — must not have to re-fetch the file to get this
+ * right. Two copies of this chain is how the browser viewer once showed zero
+ * poses for every phone recording.
+ */
+export function resolvePoses(doc, tags) {
+  const fb = doc.frames_binary;
+  const cameraKeys = fb?.cameras ?? Object.keys(doc.cameras ?? {}).sort();
+  const table = tags.WURLD_FRAMES, chunks = tags.WURLD_POSES;
+  if (table instanceof Uint8Array) {
+    if (fb && fb.version !== undefined && fb.version !== 1) {
+      throw new Error(`unsupported frames_binary version ${fb.version}`);
+    }
+    doc.frames = unpackFrames(table, cameraKeys);
+    if (fb && fb.count !== undefined && doc.frames.length !== fb.count) {
+      throw new Error(
+        `WURLD_FRAMES has ${doc.frames.length} records, expected ${fb.count}`);
+    }
+  } else if (chunks instanceof Uint8Array) {
+    doc.frames = unpackFrames(chunks, cameraKeys);
+  } else if (fb) {
+    throw new Error('frames_binary declared but WURLD_FRAMES tag missing');
+  } else {
+    doc.frames = doc.frames ?? [];
+  }
+  return doc.frames;
+}
+
+/** Unpack every IMU stream the document declares and the file carries. */
+export function readImuStreams(doc, tags) {
+  const imu = {};
+  for (const id of Object.keys(doc.imu ?? {})) {
+    const buf = tags[`WURLD_IMU_${id}`];
+    if (buf instanceof Uint8Array) imu[id] = unpackImu(buf);
+  }
+  return imu;
+}
+
 export const IMU_RECORD_SIZE = 32;
 
 export function unpackImu(buf) {
@@ -238,13 +314,26 @@ export function packFrames(frames, cameraKeys) {
 }
 
 export function unpackFrames(buf, cameraKeys) {
+  // Match the Python and C++ readers: a length that is not a whole number of
+  // records, or a camera index with no camera behind it, is corruption. Reading
+  // it as `undefined` would hand the caller a frame whose calibration silently
+  // does not exist.
+  if (buf.byteLength % FRAME_RECORD_SIZE) {
+    throw new Error(
+      `WURLD_FRAMES length ${buf.byteLength} is not a multiple of ${FRAME_RECORD_SIZE}`);
+  }
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const frames = [];
   for (let o = 0; o + FRAME_RECORD_SIZE <= buf.byteLength; o += FRAME_RECORD_SIZE) {
     const valid = (dv.getUint8(o + 44) & 1) === 1;
+    const cam = dv.getUint32(o + 4, true);
+    if (cam >= cameraKeys.length) {
+      throw new Error(
+        `frame record camera index ${cam} but only ${cameraKeys.length} cameras are declared`);
+    }
     const f = {
       i: dv.getUint32(o, true),
-      camera: cameraKeys[dv.getUint32(o + 4, true)],
+      camera: cameraKeys[cam],
       t: dv.getFloat64(o + 8, true),
     };
     if (valid) {

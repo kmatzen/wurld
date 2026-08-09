@@ -73,7 +73,7 @@
 
 <script type="module">
 import { createDecoder, dequantizeInverseDepth } from '../node_modules/chromapakz/src/chromapakz.js';
-import { ID, readWurldTags, unpackFrames as unpackBinaryFrames, unpackImu, readSeekHead,
+import { ID, readWurldTags, unpackFrames as unpackBinaryFrames, unpackImu, resolvePoses, readSeekHead,
          segmentBounds, segmentPayloadStart, collectTagsInRange, readCues, spliceFile }
   from './wurld.js';
 
@@ -140,17 +140,9 @@ function applyMetadata(tags, headline) {
   document.getElementById('drop').classList.add('hidden');
   const docStr = tags.WURLD;
   const doc = typeof docStr === 'string' ? JSON.parse(docStr) : null;
-  // Pose precedence (SPEC §9): consolidated WURLD_FRAMES table, else the
-  // concatenated WURLD_POSES chunks, else the JSON array. frames_binary is a
-  // descriptor, not a precondition — a streaming writer emits the table
-  // without one, and camera indices then resolve against sorted camera keys.
-  if (doc) {
-    const fb = doc.frames_binary;
-    const cameraKeys = fb?.cameras ?? Object.keys(doc.cameras ?? {}).sort();
-    const table = tags.WURLD_FRAMES, chunks = tags.WURLD_POSES;
-    if (table instanceof Uint8Array) doc.frames = unpackBinaryFrames(table, cameraKeys);
-    else if (chunks instanceof Uint8Array) doc.frames = unpackBinaryFrames(chunks, cameraKeys);
-  }
+  // Pose precedence (SPEC §9) lives in wurld.js so this page and the published
+  // package cannot drift apart on it.
+  if (doc) resolvePoses(doc, tags);
   state.doc = doc;
   state.tags = tags;
   // chromapakz's JS decoder skips HDR RGB streams — there is no 10-bit

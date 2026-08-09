@@ -402,7 +402,7 @@ lightweight sidecar listing member files, each with a world-frame alignment
 layering mirrors USD composition over single assets: the container stays
 simple and atomic; the scene lives one level above.
 
-A **collection manifest** (§13) is a different sidecar and does not fill that
+A **collection manifest** (§14) is a different sidecar and does not fill that
 role: it indexes many files as a dataset and asserts no spatial or temporal
 relationship between them at all.
 
@@ -426,7 +426,31 @@ Two rules follow:
   cross-agent composition belongs to the future scene manifest, not the
   container.
 
-## 13. Collection manifest (v1.2)
+## 13. Conformance corpus
+
+`conformance/vectors/` holds small files paired with the parse a conforming
+reader must produce, covering JSON and binary pose tables, unposed frames,
+stereo display streams, rigs, IMU, distorted camera models, `float16_bits`
+signals, awkward unicode, and a single-frame file.
+
+Expectations are generated from *intent*, not captured from a reader
+(`conformance/generate.py`), so the corpus cannot enshrine a bug that every
+implementation happens to share. A golden file dumped from a working reader
+would do exactly that.
+
+A third-party implementation SHOULD be checked against it:
+
+```
+python conformance/generate.py --check     # the corpus matches the writers
+pytest tests/test_conformance.py           # python, javascript and c++ readers
+```
+
+A reader MAY decline to model a field, but a runner MUST declare what it
+supports so an omission is visible rather than silently passing. The core —
+`cameras`, `frames`, `signals`, `world`, `rigs`, `imu` — is required. Binary
+frame records store `float32`, so agreement is required only to that precision.
+
+## 14. Collection manifest (v1.2)
 
 A **collection** indexes many wurld files as one dataset. It is a sidecar JSON
 document, not a container: every member remains an ordinary wurld file that

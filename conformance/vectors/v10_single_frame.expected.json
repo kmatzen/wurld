@@ -1,0 +1,43 @@
+{
+  "cameras": {
+    "0": {
+      "height": 16,
+      "model": "PINHOLE",
+      "params": [
+        17.6,
+        17.6,
+        8.0,
+        8.0
+      ],
+      "width": 16
+    }
+  },
+  "frames": [
+    {
+      "camera": "0",
+      "i": 0,
+      "pose_valid": true,
+      "q_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "t": 0.0,
+      "tr": [
+        0.0,
+        -0.0,
+        1.25
+      ]
+    }
+  ],
+  "imu": {},
+  "rgb_streams": [
+    "rgb"
+  ],
+  "rigs": {},
+  "signals": [],
+  "world": {
+    "metric_scale": true
+  }
+}
