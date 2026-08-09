@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 — 2026-08-09
+
+Streaming: sequences that did not fit in memory now convert, in Python and in
+C++. Plus a sweep for assumptions that newer features had quietly invalidated —
+one display stream, 8-bit pixels, every frame posed — which turned up seven
+defects across the exporters, none of which had failed a test.
+
+`wurld-core` (JavaScript) is unchanged since 1.2.0 and stays there.
 
 ### Added
 
