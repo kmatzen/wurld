@@ -108,6 +108,19 @@ def describe(uri: str | Path, *, checksum: bool = False) -> Member:
 
 
 @dataclass
+class Drift:
+    """One way a manifest disagrees with the files it describes."""
+
+    member: int
+    uri: str
+    kind: str        # missing | unreadable | frames | resolution | bytes | sha256 | cameras
+    detail: str
+
+    def __str__(self) -> str:
+        return f"[{self.member}] {self.uri}: {self.kind} — {self.detail}"
+
+
+@dataclass
 class Manifest:
     """A collection: an ordered list of members plus what they add up to."""
 
@@ -362,6 +375,53 @@ class Collection:
         if rng is not None:
             rng.shuffle(buf)
         yield from buf
+
+    def verify(self, *, checksum: bool = False) -> list[Drift]:
+        """Re-read every member's header and report where the manifest lies.
+
+        Worth doing before a training run, and cheap enough to be routine: the
+        header reads that built the manifest are the same ones that check it.
+
+        Drift is not cosmetic. Global frame indexing is computed from the cached
+        ``frames`` counts, so a member that gained or lost frames silently
+        shifts every index after it — `locate()` keeps returning an answer, just
+        the wrong one. That is the failure this exists to catch.
+        """
+        out: list[Drift] = []
+        for mi, member in enumerate(self.manifest.members):
+            uri = self.resolve(member)
+            if not _is_remote(uri) and not Path(uri).exists():
+                out.append(Drift(mi, member.uri, "missing", "file does not exist"))
+                continue
+            try:
+                fresh = describe(uri, checksum=checksum and member.sha256 is not None)
+            except Exception as exc:                   # noqa: BLE001 - reported below
+                out.append(Drift(mi, member.uri, "unreadable", f"{type(exc).__name__}: {exc}"))
+                continue
+
+            if fresh.frames != member.frames:
+                out.append(Drift(mi, member.uri, "frames",
+                                 f"manifest says {member.frames}, file has {fresh.frames} "
+                                 "— every global index after this member is wrong"))
+            if fresh.posed_frames != member.posed_frames:
+                out.append(Drift(mi, member.uri, "frames",
+                                 f"posed {member.posed_frames} -> {fresh.posed_frames}"))
+            if (fresh.width, fresh.height) != (member.width, member.height):
+                out.append(Drift(mi, member.uri, "resolution",
+                                 f"{member.width}x{member.height} -> "
+                                 f"{fresh.width}x{fresh.height}"))
+            if sorted(fresh.cameras) != sorted(member.cameras):
+                out.append(Drift(mi, member.uri, "cameras",
+                                 f"{member.cameras} -> {fresh.cameras}"))
+            if member.bytes is not None and fresh.bytes is not None \
+                    and fresh.bytes != member.bytes:
+                out.append(Drift(mi, member.uri, "bytes",
+                                 f"{member.bytes} -> {fresh.bytes}"))
+            if checksum and member.sha256 and fresh.sha256 \
+                    and fresh.sha256 != member.sha256:
+                out.append(Drift(mi, member.uri, "sha256",
+                                 "content changed while the header still matches"))
+        return out
 
     def __repr__(self) -> str:
         return (f"Collection({len(self.manifest.members)} members, "

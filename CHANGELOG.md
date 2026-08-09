@@ -57,6 +57,12 @@
   Members stay ordinary playable wurld files — a collection is a sidecar, not a
   container, and asserts nothing about how members relate in space or time
   (that remains the separate scene-manifest concern reserved in §11).
+- **`Collection.verify()` / `wurld collection --verify`** — re-reads every
+  member's header and reports drift. Global frame indexing is computed from the
+  manifest's cached counts, so a member that gained or lost frames silently
+  shifts every index after it while `locate()` keeps returning an answer.
+  `--checksum` also compares recorded hashes, which catches content changes a
+  header check cannot see.
 - **`wurld.integrations.torch_data`** (`pip install 'wurld[torch]'`) —
   `WurldIterableDataset` shards across DataLoader workers *and* distributed
   ranks, decoding each member exactly once; `WurldFrameDataset` is map-style for

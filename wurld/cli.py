@@ -370,6 +370,17 @@ def _cmd_collection(args) -> int:
         for i, mem in enumerate(m.members):
             print(f"  [{i}] {mem.uri}  {mem.frames} frames ({mem.posed_frames} posed)"
                   f"  {mem.width}x{mem.height}")
+
+    if args.verify:
+        drift = c.verify(checksum=args.checksum)
+        if drift:
+            print(f"\n{len(drift)} problem(s) — this manifest no longer describes "
+                  "its files:", file=sys.stderr)
+            for d in drift:
+                print(f"  {d}", file=sys.stderr)
+            print("  rebuild with: wurld index ...", file=sys.stderr)
+            return 1
+        print(f"  verified: {len(m.members)} members match their headers")
     return 0
 
 
@@ -463,6 +474,10 @@ def main(argv=None) -> int:
     p_cinfo = sub.add_parser("collection", help="summarize a collection manifest")
     p_cinfo.add_argument("manifest")
     p_cinfo.add_argument("--members", action="store_true", help="list every member")
+    p_cinfo.add_argument("--verify", action="store_true",
+                         help="re-read every member's header and report drift")
+    p_cinfo.add_argument("--checksum", action="store_true",
+                         help="with --verify, also compare recorded sha256 (reads every byte)")
     p_cinfo.set_defaults(func=_cmd_collection)
 
     args = p.parse_args(argv)

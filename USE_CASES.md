@@ -212,6 +212,10 @@ What it buys, in order of how much it matters:
   by bisection over cumulative counts.
 - **Sharding that keeps whole files together.** A worker that opens a member uses
   all of it, so each member decodes once.
+- **Verification**, because the manifest caches frame counts and global indexing
+  is derived from them. A member re-exported one frame shorter shifts every
+  index after it, and nothing complains — `locate()` still answers, just wrongly.
+  `wurld collection ... --verify` re-reads headers and exits non-zero on drift.
 
 The sharding is the part worth being paranoid about, and the tests are written
 that way: a bad split does not crash, it silently trains on duplicated frames at

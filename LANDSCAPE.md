@@ -213,8 +213,14 @@ where measurement contradicted it — the survey is left unedited, so this is th
 
 ### The milestones
 
-1. **Spec + reference implementation + validator** — shipped. `SPEC.md`, Python and JS
-   readers, `wurld validate` for conformance, parsers fuzzed.
+1. **Spec + reference implementation + validator** — shipped, all three languages.
+   `SPEC.md`, Python, JavaScript and a dependency-free single-header C++17 reader,
+   `wurld validate` for conformance, parsers fuzzed. A conformance corpus
+   (SPEC §13) is the shared definition of correct: expectations generated from
+   intent rather than captured from any one reader, so the three cannot drift
+   apart quietly. C++ also writes — attaching a metadata layer to an encoded
+   WebM, which keeps the zero-dependency property that made the reader worth
+   putting on a robot.
 2. **Converters** — shipped, seven layouts: COLMAP, `transforms.json`, TUM, EuRoC,
    Record3D, Polycam, Stray. TUM round-trip verified against the real `freiburg1_desk`
    sequence: 572/573 poses associated within 10 ms at **0.000 mm** translation error,
@@ -222,10 +228,18 @@ where measurement contradicted it — the survey is left unedited, so this is th
 3. **Browser demo** — shipped and hosted: seekable posed-RGBD playback with per-frame
    point-cloud reprojection, plus a camera picker for multi-stream files and exports
    for the pieces ffmpeg cannot reach.
-4. **Ecosystem PRs** — partial. nerfstudio dataparser and MCAP/Foxglove export shipped;
-   the LeRobot depth backend is written but held private; **no ffmpeg demuxer**, which
-   remains the largest unbuilt wedge. `EXTRACTING.md` plus a WebVTT pose track were the
-   pragmatic substitute — they make the data reachable from stock ffmpeg without one.
+4. **Ecosystem PRs** — mostly shipped. nerfstudio dataparser, MCAP/Foxglove
+   export, and a **ROS 2 bridge** writing real rosbag2 files (CDR `sensor_msgs`
+   and `tf2_msgs`, so `ros2 bag play` works) — the Foxglove MCAP export never
+   could, being jsonschema channels no ROS node subscribes to. The LeRobot depth
+   backend is written but held private.
+
+   Still no **ffmpeg demuxer**, and on closer inspection it is a weaker wedge
+   than this document assumed. ffprobe already surfaces the `WURLD` document,
+   and `wurld pose-track` exposes poses to stock ffmpeg as WebVTT; the only
+   thing left unreachable is `TagBinary`, which needs a `libavformat` patch. A
+   patch that cannot be landed upstream is a fork nobody installs, so this is
+   parked rather than pending.
 
 ### Where the analysis was wrong, or too kind
 
@@ -268,6 +282,14 @@ where measurement contradicted it — the survey is left unedited, so this is th
   a per-app layout, and the recipe is the adoption path.
 - **#4 (MV-HEVC / stereo) pairs with #1 as expected.** Multi-camera display streams
   landed, so both eyes of a stereo rig ride one file bound to calibration by camera id.
+
+### What is still missing
+
+Not reach — that is now covered in three languages plus ROS — but **users**.
+Every gap above was a capability gap; the remaining one is that the format has
+more capability than it has adopters, and no amount of further building fixes
+that. The cheapest distribution left is the LeRobot depth backend, written and
+sitting private.
 
 ### What this document should not be used for
 

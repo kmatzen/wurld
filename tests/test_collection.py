@@ -351,3 +351,92 @@ def test_checksum_is_recorded_when_asked(tmp_path):
     m = col.describe(p, checksum=True)
     assert m.sha256 == hashlib.sha256(p.read_bytes()).hexdigest()
     assert col.describe(p).sha256 is None
+
+
+# ---------------------------------------------------------------- verification
+
+def test_verify_passes_on_an_untouched_corpus(manifest):
+    root, m = manifest
+    assert col.Collection(m, root=root).verify() == []
+
+
+def test_verify_catches_a_member_whose_frame_count_changed(tmp_path):
+    """The drift that silently shifts every global index after it."""
+    _write_seq(tmp_path / "a.wl.webm", 4)
+    _write_seq(tmp_path / "b.wl.webm", 5)
+    m, _ = col.build_manifest(tmp_path, relative_to=tmp_path)
+    c = col.Collection(m, root=tmp_path)
+    assert len(c) == 9
+    assert c.locate(6) == (1, 2)
+
+    # Re-record the first member one frame shorter, as a re-export would.
+    _write_seq(tmp_path / "a.wl.webm", 3)
+
+    drift = c.verify()
+    kinds = {d.kind for d in drift}
+    assert "frames" in kinds
+    assert any("every global index after this member is wrong" in d.detail
+               for d in drift)
+    # The stale collection still answers, which is exactly the danger.
+    assert c.locate(6) == (1, 2)
+
+
+def test_verify_catches_missing_and_unreadable_members(tmp_path):
+    _write_seq(tmp_path / "a.wl.webm", 3)
+    _write_seq(tmp_path / "b.wl.webm", 3)
+    m, _ = col.build_manifest(tmp_path, relative_to=tmp_path)
+    c = col.Collection(m, root=tmp_path)
+
+    (tmp_path / "a.wl.webm").unlink()
+    (tmp_path / "b.wl.webm").write_bytes(b"\x1a\x45\xdf\xa3 truncated")
+
+    drift = {d.kind for d in c.verify()}
+    assert drift == {"missing", "unreadable"}
+
+
+def test_verify_catches_a_resolution_change(tmp_path):
+    _write_seq(tmp_path / "a.wl.webm", 3, w=32, h=24)
+    m, _ = col.build_manifest(tmp_path, relative_to=tmp_path)
+    c = col.Collection(m, root=tmp_path)
+    _write_seq(tmp_path / "a.wl.webm", 3, w=64, h=48)
+
+    drift = c.verify()
+    assert any(d.kind == "resolution" for d in drift), drift
+
+
+def test_verify_checksum_catches_content_changes_the_header_hides(tmp_path):
+    """Same frame count and size, different pixels: only a hash sees it."""
+    import hashlib
+    p = _write_seq(tmp_path / "a.wl.webm", 3)
+    m, _ = col.build_manifest(tmp_path, relative_to=tmp_path, checksum=True)
+    c = col.Collection(m, root=tmp_path)
+    assert c.verify(checksum=True) == []
+
+    # Flip a byte deep in the cluster data, leaving the header untouched.
+    data = bytearray(p.read_bytes())
+    data[-8] ^= 0xFF
+    p.write_bytes(bytes(data))
+
+    plain = c.verify()
+    assert not any(d.kind == "sha256" for d in plain), "header check cannot see this"
+    hashed = c.verify(checksum=True)
+    assert any(d.kind == "sha256" for d in hashed), hashed
+
+
+def test_cli_collection_verify_exits_nonzero_on_drift(tmp_path):
+    _write_seq(tmp_path / "a.wl.webm", 4)
+    out = tmp_path / "c.json"
+    subprocess.run([sys.executable, "-m", "wurld.cli", "index", str(tmp_path),
+                    "-o", str(out)], capture_output=True, text=True, check=True)
+
+    ok = subprocess.run([sys.executable, "-m", "wurld.cli", "collection", str(out),
+                         "--verify"], capture_output=True, text=True)
+    assert ok.returncode == 0
+    assert "verified" in ok.stdout
+
+    _write_seq(tmp_path / "a.wl.webm", 2)
+    bad = subprocess.run([sys.executable, "-m", "wurld.cli", "collection", str(out),
+                          "--verify"], capture_output=True, text=True)
+    assert bad.returncode == 1
+    assert "no longer describes" in bad.stderr
+    assert "wurld index" in bad.stderr

@@ -288,6 +288,18 @@ ds = WurldIterableDataset("collection.json", fields=("rgb", "depth"))
 loader = DataLoader(ds, batch_size=8, num_workers=4)     # shards itself
 ```
 
+Verify before you train — the manifest caches frame counts, and global indexing
+is computed from them, so a member that was re-exported one frame shorter shifts
+every index after it while `locate()` keeps returning an answer:
+
+```bash
+wurld collection collection.json --verify     # exits 1 on drift
+```
+
+It re-reads headers, which is the same cheap read that built the manifest.
+`--checksum` additionally compares recorded hashes, which is the only way to see
+a change that leaves the header identical.
+
 A collection asserts nothing about how members relate in space or time; that is
 the separate scene-manifest concern reserved in SPEC §11.
 
