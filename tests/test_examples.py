@@ -65,6 +65,33 @@ def test_slam_trajectory_export(tmp_path):
         assert len(line.split()) == 8
 
 
+def test_hdr_exr_render(tmp_path):
+    out = tmp_path / "hdr.wl.webm"
+    stdout = _run("05_hdr_exr_render.py", out)
+    assert v.validate(out) == []
+
+    import numpy as np
+    seq = wl.read(out)
+    # float16_bits is a reinterpretation, not a conversion: the codes are the float.
+    vals = seq.signal_values("hdr_r")
+    assert vals.dtype == np.float16
+    assert float(np.nanmax(vals)) > 1000.0          # HDR range survived, not clipped
+    assert "bit-exact round trip: True" in stdout
+    # The honest framing must stay in the output — it can lose to EXR.
+    assert "LARGER than EXR" in stdout
+
+
+def test_float16_bits_carries_the_float_edge_cases():
+    """NaN, infinities, -0.0 and denormals are all just bit patterns here."""
+    import numpy as np
+    from wurld.container import SignalMeta
+    m = SignalMeta("x", "custom", {"type": "float16_bits"})
+    src = np.array([np.nan, np.inf, -np.inf, -0.0, 0.0, 6e-8, 65504.0], np.float16)
+    back = m.apply(src.view(np.uint16))
+    assert back.dtype == np.float16
+    assert (back.view(np.uint16) == src.view(np.uint16)).all()
+
+
 def test_robot_rig_and_imu(tmp_path):
     out = tmp_path / "rig.wl.webm"
     _run("04_robot_rig_imu.py", out)

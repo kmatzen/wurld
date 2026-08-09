@@ -179,6 +179,12 @@ def _check_signals(r: _Report, doc: dict) -> None:
         elif kind == "labels":
             if not isinstance(vm.get("labels"), dict):
                 r.error("6", f"signal {sid!r}: labels value_map needs a labels object")
+        elif kind == "float16_bits":
+            # The codes are the float, so an `invalid` sentinel is meaningless:
+            # every bit pattern denotes a value, and absence is NaN.
+            if "invalid" in vm:
+                r.warn("6", f"signal {sid!r}: float16_bits has no invalid code — "
+                            "every bit pattern is a value; use NaN for absence")
         elif kind is None:
             r.warn("6", f"signal {sid!r}: no value_map; consumers cannot interpret the codes")
         else:

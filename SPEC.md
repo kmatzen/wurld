@@ -158,11 +158,32 @@ inverse_depth: value = 1 / (a * raw + b)             (chromapakz near/far quanti
                                                       a, b derived from near/far/levels)
 labels:        raw is categorical; labels maps raw → name
 identity:      raw is the value (IDs, packed encodings)
+float16_bits:  raw IS an IEEE 754 binary16, reinterpreted (v1.2)
 ```
 
 When a chromapakz signal already carries a `quant` spec (e.g. `inverse-depth`), the
 wurld `value_map` MUST agree with it; the chromapakz spec is authoritative for
 decode, wurld's copy is for consumers that read metadata only.
+
+### 6.1 `float16_bits` (v1.2)
+
+Not a quantization. The uint16 code is the half-float's bit pattern, so a
+lossless signal track carries scene-referred HDR — an EXR half channel, one
+signal per colour channel — with no range, no scale factor and no loss.
+
+Readers MUST reinterpret the code as IEEE 754 binary16 rather than converting
+it. Every bit pattern denotes a value, including NaN, ±Inf, −0.0 and denormals,
+so a `float16_bits` value map MUST NOT declare an `invalid` code: absence is
+expressed as NaN, which is itself a bit pattern that round-trips.
+
+This is *scene-referred* data — linear radiance, unbounded above 1.0 — and is
+distinct from an HDR *display* track, which is display-referred (PQ or HLG,
+absolute nits) and lives in the lossy RGB stream. A file may carry both; they
+answer different questions and neither substitutes for the other.
+
+Writers SHOULD set `role: "custom"` unless a more specific role applies, and
+SHOULD name channels so their correspondence is unambiguous (`hdr_r`, `hdr_g`,
+`hdr_b`). float32 sources do not fit a 16-bit code and are out of scope.
 
 ## 7. Binary frame table (v0.2)
 

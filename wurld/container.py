@@ -248,6 +248,13 @@ class SignalMeta:
             return cz.dequantize_inverse(
                 raw, near=vm["near"], far=vm["far"], levels=vm.get("levels", 65536)
             )
+        if kind == "float16_bits":
+            # Not a quantization: the codes *are* the float. IEEE half is exactly
+            # 16 bits, so a lossless uint16 signal carries scene-referred HDR
+            # (EXR half) bit-exactly — NaN, +/-Inf, -0.0 and denormals included.
+            # There is no `invalid` code, because every bit pattern is a value;
+            # absence is expressed as NaN, which is itself a bit pattern.
+            return np.ascontiguousarray(raw, dtype=np.uint16).view(np.float16)
         raise ValueError(f"unknown value_map type {kind!r}")
 
 
@@ -280,7 +287,22 @@ class Sequence:
         return self._decode().get("rgb")
 
     def signal(self, signal_id: str) -> np.ndarray:
+        """Raw uint16 codes, exactly as stored."""
         return self._decode()["signals"][signal_id]
+
+    def signal_values(self, signal_id: str, frame_index: int | None = None) -> np.ndarray:
+        """Codes mapped through the signal's value_map to physical values.
+
+        The general form of `depth_meters`, which is the depth-role shorthand.
+        Signals with no declared value_map come back as raw codes.
+        """
+        raw = self.signal(signal_id)
+        if frame_index is not None:
+            raw = raw[frame_index]
+        for s in self.signals:
+            if s.id == signal_id:
+                return s.apply(raw)
+        return raw
 
     def signal_meta(self, role: str) -> SignalMeta | None:
         for s in self.signals:

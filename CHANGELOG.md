@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`float16_bits` value map (SPEC §6.1)** — scene-referred HDR. An IEEE half is
+  exactly 16 bits, so a lossless signal carries EXR half-float bit-exactly, one
+  signal per channel: NaN, ±Inf, −0.0 and denormals all round-trip, and there is
+  no `invalid` code because every bit pattern denotes a value.
+- **`Sequence.signal_values(id)`** — codes through their value map, the general
+  form of `depth_meters`.
+- **`examples/05_hdr_exr_render.py`**, and `wurld validate` accepts the new type.
+
+Whether this beats EXR depends on temporal coherence: measured against EXR/ZIP,
+13.5x smaller for a static denoised render, 1.5x when the camera moves, and
+0.8x — *larger* — for raw path-traced output with per-frame Monte Carlo noise.
+Denoise before archiving.
+
+
 ## 1.1.1 — 2026-08-06
 
 Documentation-only republish: the package page now carries the current README

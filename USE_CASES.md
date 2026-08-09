@@ -325,23 +325,32 @@ point.
 
 ### HDR, in two separate senses
 
-**Scene-referred HDR data — works today, wants a spec entry.** EXR half-float is
-exactly 16 bits, so the raw bit patterns store losslessly as `uint16` signal
-codes, one signal per channel. Measured on synthetic render content with
-path-tracing noise (320×240 half-float RGB):
+**Scene-referred HDR data — shipped as `float16_bits` (SPEC §6.1).** EXR
+half-float is exactly 16 bits, so the raw bit patterns store losslessly as
+`uint16` signal codes, one signal per channel. Nothing is quantised: the codes
+*are* the floats, so NaN, ±Inf, −0.0 and denormals survive, and there is no
+`invalid` sentinel because every bit pattern denotes a value. Read it back with
+`Sequence.signal_values(id)`. Demonstrated in
+`examples/05_hdr_exr_render.py`.
 
-    raw half-float             450.0 KiB/frame
-    zlib per frame (~EXR/ZIP)  242.7 KiB/frame    1.85x
-    chromapakz lossless         38.6 KiB/frame   11.66x      17.8 ms/frame
+**Whether it beats EXR depends on temporal coherence, and it can lose.** An
+earlier version of this document claimed a flat 6.3x, measured on a sequence
+that repeated one frame — a degenerate case that gave VP9 a keyframe and seven
+free P-frames. Re-measured across regimes (320×240 half-float RGB, 16 frames,
+against EXR/ZIP, which is zlib per frame):
 
-**6.3× smaller than EXR/ZIP, bit-exact**, with NaN, ±Inf, −0.0 and denormals all
-surviving. The advantage is temporal — VP9 exploits inter-frame redundancy where
-EXR compresses each frame alone — so expect less on sequences with hard cuts.
+| render | vs EXR/ZIP |
+|---|---|
+| static camera, denoised | **13.5x smaller** |
+| moving camera, denoised | **1.5x smaller** |
+| static camera, per-frame Monte Carlo noise | 0.80x — *larger* |
+| moving camera, per-frame Monte Carlo noise | 0.78x — *larger* |
 
-*Plan:* add a `value_map` of `{"type": "float16_bits"}` so the reinterpretation
-is declared rather than a private convention, with writer and reader support and
-a SPEC paragraph. Small and well understood. Until then this works but no
-consumer knows to do it.
+Denoising matters more than motion. Lossless coding of independent per-frame
+noise costs more than zlib, so raw path-traced output at low sample counts is
+the case where this loses. Production renders are usually denoised, which is
+the regime where it wins — but it is worth measuring on real sequences rather
+than taking a number from here.
 
 **HDR10 display track — shipped in ChromaPakZ 0.8.0, not yet used by wurld.**
 [#51](https://github.com/kmatzen/ChromaPakZ/issues/51) landed: VP9 profile 2,
