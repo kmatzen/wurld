@@ -192,6 +192,33 @@ cmake -S cpp -B cpp/build && cmake --build cpp/build
 ./cpp/build/wurld_info scene.wl.webm
 ```
 
+### Writing from C++
+
+`cpp/include/wurld_write.hpp` attaches a metadata layer to an already-encoded
+WebM. That split is the point: a robot already has chromapakz for encoding, and
+pulling libvpx into this header would destroy the zero-dependency property that
+made the reader worth having.
+
+```cpp
+#include "wurld_write.hpp"
+wurld::WriteDoc doc;
+doc.cameras["0"] = {"PINHOLE", 640, 480, {525, 525, 320, 240}};
+doc.frames.push_back({0, 0.0, "0", true, {1,0,0,0}, {0,0,0}});
+doc.world_json = R"({"metric_scale":true})";
+wurld::write_file("encoded.webm", "out.wl.webm", doc);   // or wurld::attach(bytes, doc)
+```
+
+Inserting tags shifts every Cluster, so Cues are rebuilt at the new offsets and
+the SeekHead is regenerated — a carried-over Cues element seeks into the middle
+of a Cluster, which presents as corrupt video rather than as a muxing bug.
+Re-attaching replaces the previous wurld tags instead of accumulating them,
+while leaving foreign tags (chromapakz's own) untouched.
+
+The bar is equality with Python, not merely readability: `pack_frames` and
+`pack_imu` must emit byte-identical buffers, and a C++-written file must satisfy
+`wurld validate` and read identically through all three readers
+(`tests/test_cpp_writer.py`).
+
 ## Collections: a corpus as a dataset
 
 One file is one sequence; training is ten thousand of them. A **collection**

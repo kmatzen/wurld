@@ -16,6 +16,13 @@
   intrinsics apply. `Sequence.rgb_streams` / `rgb_for(id)` read them. Poses stay
   single-camera with rig-derived siblings; a lone stream keeps the conventional
   id `rgb` and binds implicitly, so existing files are unaffected.
+- **C++ writer** (`cpp/include/wurld_write.hpp`) — attaches calibration, poses
+  and IMU to an already-encoded WebM, keeping the zero-dependency property:
+  chromapakz encodes, wurld attaches. Rebuilds Cues at the shifted offsets and
+  regenerates the SeekHead, and replaces previous wurld tags on re-attach while
+  leaving foreign tags alone. Verified byte-identical to the Python packers, and
+  its output satisfies `wurld validate` and reads identically through all three
+  readers. `wurld_attach` drives it from the command line.
 - **Conformance corpus** (`conformance/`) — small vectors plus the parse a
   reader must produce, checked against the Python, JavaScript and C++ readers by
   one harness. Expectations are generated from intent rather than captured from
