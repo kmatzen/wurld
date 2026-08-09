@@ -18,8 +18,6 @@ T_WB with T_BS the recovered poses would be wrong by that fixed transform. A tes
 that merely checked "poses exist" would pass with the bug in place.
 """
 
-import os
-
 import numpy as np
 import pytest
 
@@ -335,7 +333,9 @@ def test_a_full_length_sequence_does_not_need_to_fit_in_memory(tmp_path):
         root = tmp_path / f"len{n}"
         mav0 = _write_fixture(root, frames=n)
         tracemalloc.start()
-        euroc.from_euroc(mav0, root / "out.wl.webm")
+        # Forced: the fixture is small enough that the size heuristic would
+        # choose the batch path, which materialises by design.
+        euroc.from_euroc(mav0, root / "out.wl.webm", streaming=True)
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
         return peak
@@ -346,3 +346,28 @@ def test_a_full_length_sequence_does_not_need_to_fit_in_memory(tmp_path):
     assert long < 1.6 * short, (
         f"peak grew from {short/1e6:.1f} MB at 4 frames to {long/1e6:.1f} MB at "
         f"{N_IMG} — memory is tracking sequence length, not frame size")
+
+
+def test_the_writer_choice_is_visible_and_forcible(tmp_path):
+    """Streaming and batch differ in pose precision, so the choice must be one."""
+    root = tmp_path / "choice"
+    mav0 = _write_fixture(root)
+
+    batch = root / "batch.wl.webm"
+    streamed = root / "stream.wl.webm"
+    euroc.from_euroc(mav0, batch, streaming=False)
+    euroc.from_euroc(mav0, streamed, streaming=True)
+    assert v.validate(batch) == [] and v.validate(streamed) == []
+
+    from wurld import ebml
+    # The batch path keeps poses in the document; streaming puts them in the
+    # binary table. Both read back as the same poses, to float32.
+    assert "WURLD_FRAMES" not in ebml.read_all_tags(batch.read_bytes())
+    assert isinstance(ebml.read_all_tags(streamed.read_bytes()).get("WURLD_FRAMES"), bytes)
+
+    a, b = wl.read(batch), wl.read(streamed)
+    assert len(a.frames) == len(b.frames)
+    for x, y in zip(a.frames, b.frames):
+        assert x.pose_valid == y.pose_valid
+        if x.pose_valid:
+            assert np.abs(np.asarray(x.c2w) - np.asarray(y.c2w)).max() < 1e-6

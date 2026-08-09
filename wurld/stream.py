@@ -367,6 +367,33 @@ class StreamReader:
             self._pos = 0
 
 
+def should_stream(n_frames, width, height, streams=1, budget_fraction=0.25):
+    """Would materialising this sequence be reckless?
+
+    `container.write` takes whole arrays and gives float64 poses in the JSON
+    frames array; `write_streaming` holds one frame and stores poses in the
+    binary table, which SPEC §7 defines as float32. Neither is strictly better:
+    the batch path keeps ~60 nanometres of precision that streaming rounds away,
+    and the streaming path converts sequences the batch path cannot open at all.
+
+    So pick by size rather than by preference. A real EuRoC run is 2912 stereo
+    frames at 752x480 — 8.4 GB materialised — while a 573-frame TUM capture is
+    0.7 GB and better served by the exact path.
+
+    Returns False when the machine's memory cannot be determined, because
+    guessing "stream" would silently degrade precision on every platform that
+    does not report it.
+    """
+    need = int(n_frames) * int(width) * int(height) * 4 * max(1, int(streams))
+    try:
+        import os
+
+        budget = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (ValueError, OSError, AttributeError):     # not POSIX, or not reported
+        return False
+    return need > budget_fraction * budget
+
+
 def write_streaming(
     path,
     *,

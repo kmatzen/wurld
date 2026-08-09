@@ -24,7 +24,6 @@ def _write_seq(path, n, *, w=32, h=24, unposed=(), metric=True, fps=30):
     """A small real wurld file: RGB + depth, some frames optionally unposed."""
     import chromapakz as cz
 
-    rng = np.random.default_rng(abs(hash(str(path))) % 2**31)
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     rgb, depth = [], []
     for i in range(n):
@@ -406,7 +405,6 @@ def test_verify_catches_a_resolution_change(tmp_path):
 
 def test_verify_checksum_catches_content_changes_the_header_hides(tmp_path):
     """Same frame count and size, different pixels: only a hash sees it."""
-    import hashlib
     p = _write_seq(tmp_path / "a.wl.webm", 3)
     m, _ = col.build_manifest(tmp_path, relative_to=tmp_path, checksum=True)
     c = col.Collection(m, root=tmp_path)

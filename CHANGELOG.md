@@ -19,8 +19,10 @@
   `add_frame(rgbs=...)`), the streaming counterpart of `write(rgb={id: array})`.
   Stream ids are validated against the declared cameras at construction, before
   any encoding.
-- **The EuRoC importer streams**, and `from_euroc(..., max_frames=N)` converts a
-  prefix. The full real V1_01_easy sequence now converts in 284 s at a **68 MB**
+- **The EuRoC importer picks its writer by size** (`wurld.stream.should_stream`):
+  streaming when materialising would take over a quarter of memory, the exact
+  batch path otherwise, and `streaming=True/False` to force either.
+  `from_euroc(..., max_frames=N)` converts a prefix. The full real V1_01_easy sequence now converts in 284 s at a **68 MB**
   peak, against the 8.4 GB it would have needed materialised — it previously
   could not be converted at all on an 8 GB machine. Its poses now live in the
   binary frame table, so they are float32 (~1e-7 on metre-scale translations)
@@ -50,6 +52,9 @@ pull-based and never had the defect.
 
 ### Fixed
 
+- EuRoC dropped frames whose cam1 image was missing without saying so; it now
+  warns with the count. Zero on a real hardware-synced sequence, non-zero on a
+  trimmed one — and an unexplained frame count is hard to chase later.
 - **Streaming held a whole file, not a Cluster.** `Sequence.iter_frames`
   documented bounded memory and delivered it for packets but not for buffers: a
   spliced single-Cluster file still advertised the whole sequence's frame count,

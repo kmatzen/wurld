@@ -76,16 +76,12 @@ def test_euroc_import(euroc_fixture, scene, tmp_path):
     euroc.from_euroc(seq_dir, out)
     seq = wl.read(out)
 
-    # cam0 poses reconstruct through gt -> T_WB -> T_BS0.
-    #
-    # Tolerance is float32, not float64: the importer streams now (a real EuRoC
-    # sequence is 8.4 GB of RGBA if materialised), and the streaming layout
-    # stores poses in the binary frame table, which is float32 by SPEC §7. That
-    # is ~6e-8 on a metre-scale translation — 60 nanometres. Timestamps are
-    # unaffected; the table stores them as float64.
+    # cam0 poses reconstruct through gt -> T_WB -> T_BS0 (text csv precision).
+    # This sequence is small enough for the batch path, which keeps float64
+    # poses; a sequence large enough to stream would be float32 (SPEC §7).
     assert len(seq.frames) == 10
     for i in (0, 5, 9):
-        assert np.abs(seq.c2w(i) - scene["frames"][i].c2w).max() < 1e-6
+        assert np.abs(seq.c2w(i) - scene["frames"][i].c2w).max() < 1e-9
         assert seq.frames[i].t == pytest.approx(scene["frames"][i].t, abs=1e-9)
 
     # both cameras' calibration present; OPENCV distortion carried
@@ -98,8 +94,7 @@ def test_euroc_import(euroc_fixture, scene, tmp_path):
     assert np.allclose(conventions.pose_to_matrix(rig["0"]["q_wxyz"], rig["0"]["tr"]), t_bs0)
     c2w1 = seq.rig_c2w(0, "1", "body")
     expected = scene["frames"][0].c2w @ conventions.invert_pose(t_bs0) @ t_bs1
-    # float32, as above: the derived pose inherits the stored pose's precision.
-    assert np.abs(c2w1 - expected).max() < 1e-6
+    assert np.abs(c2w1 - expected).max() < 1e-9
 
     # imu: 40 samples, extrinsics = inv(TBS0) @ TBS_imu
     imu = seq.imu["imu0"]

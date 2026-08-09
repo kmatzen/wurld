@@ -228,9 +228,15 @@ whole real sequence now converts:
 | poses vs independent recomputation | 1.2e-07 |
 
 The residual 1.2e-07 is float32: the streaming layout stores poses in the binary
-frame table (SPEC §7), where the batch path would have used the float64 JSON
-array for a sequence this short. Sixty nanometres on a metre-scale translation,
-and timestamps keep float64 either way.
+frame table (SPEC §7), where the batch path uses the float64 JSON array. Sixty
+nanometres on a metre-scale translation, and timestamps keep float64 either way.
+
+Because that is a real trade rather than a free win, the importer picks by size:
+`wurld.stream.should_stream` streams when materialising would take more than a
+quarter of the machine's memory, and otherwise takes the exact path. A short
+sequence keeps float64 poses; a real one converts at all. `streaming=True/False`
+forces either, and the choice is visible in the file — poses in the document, or
+in the binary table.
 
 `wurld.stream.write_streaming` is the reusable form of this. The other six
 importers still materialise; EuRoC is simply the first input large enough to

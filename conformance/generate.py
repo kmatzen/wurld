@@ -22,7 +22,6 @@ in a second.
 
 import argparse
 import json
-import shutil
 import sys
 from pathlib import Path
 

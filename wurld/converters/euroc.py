@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import csv
 import re
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -142,7 +143,18 @@ def from_euroc(
     rgb_kbps: int = 4000,
     stereo: bool = True,
     max_frames: int | None = None,
+    streaming: bool | None = None,
 ) -> Path:
+    """Convert a EuRoC sequence.
+
+    ``streaming`` picks how the file is written: ``None`` decides by size (see
+    :func:`wurld.stream.should_stream`), ``True`` always holds one frame at a
+    time, ``False`` always materialises. The choice is visible in the result —
+    streaming stores poses in the binary table (float32, SPEC §7) where the
+    batch path uses the float64 JSON array — so it is worth being able to force
+    either: precision on a small sequence, or a conversion that finishes at all
+    on a large one.
+    """
     base = _mav_dir(Path(seq_dir))
 
     cam0, t_bs0 = _read_cam_yaml(base / "cam0" / "sensor.yaml")
@@ -218,6 +230,13 @@ def from_euroc(
     if len(ts) > 1 and ts[-1] > ts[0]:
         fps = round((len(ts) - 1) / (ts[-1] - ts[0]), 3)
 
+    if skipped:
+        # cam0 and cam1 are hardware-synced on a real VI-sensor, so this is 0
+        # there; a resynthesised or trimmed sequence can differ, and dropping
+        # frames without saying so turns into an unexplained count later.
+        logging.getLogger(__name__).warning(
+            "%s: dropped %d frame(s) with no matching cam1 image", base, skipped)
+
     world = {
         "metric_scale": True,
         "gravity_in_world": [0.0, 0.0, -1.0],  # EuRoC world (Leica/Vicon) is z-up
@@ -246,11 +265,40 @@ def from_euroc(
             else:
                 yield frame, load(p0), None, {}
 
-    return stream.write_streaming(
+    # Stream only when materialising would be reckless. The batch path keeps
+    # float64 poses (the JSON frames array) where streaming rounds them to the
+    # binary table's float32; a short sequence should not pay that to solve a
+    # problem it does not have.
+    cam0 = cameras["0"]
+    if streaming is None:
+        streaming = stream.should_stream(len(frames), cam0.width, cam0.height,
+                                         2 if want_stereo else 1)
+    if streaming:
+        return stream.write_streaming(
+            out_path,
+            cameras=cameras,
+            frames=source(),
+            rgb_streams=["0", "1"] if want_stereo else None,
+            rigs=rigs,
+            imu=imu,
+            fps=fps,
+            rgb_kbps=rgb_kbps,
+            world=world,
+        )
+
+    left, right = [], []
+    for _frame, one, pair, _sig in source():
+        if want_stereo:
+            left.append(pair["0"])
+            right.append(pair["1"])
+        else:
+            left.append(one)
+    return container.write(
         out_path,
         cameras=cameras,
-        frames=source(),
-        rgb_streams=["0", "1"] if want_stereo else None,
+        frames=frames,
+        rgb=({"0": np.stack(left), "1": np.stack(right)} if want_stereo
+             else np.stack(left)),
         rigs=rigs,
         imu=imu,
         fps=fps,
