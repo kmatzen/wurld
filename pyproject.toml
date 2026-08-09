@@ -22,6 +22,7 @@ wurld = "wurld.cli:main"
 dev = ["pytest>=8"]
 mcap = ["mcap>=1.0"]
 record3d = ["pyliblzfse>=0.4"]
+euroc = ["pyyaml>=6"]
 
 [tool.setuptools.packages.find]
 include = ["wurld*"]

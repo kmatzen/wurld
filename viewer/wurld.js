@@ -198,6 +198,25 @@ function collectTags(b, start, end, out, dec = new TextDecoder()) {
 }
 
 // ---------- frame records (SPEC §7): 45 bytes LE ----------
+/** IMU record (SPEC §8.3): 32 bytes LE — f64 t, 3xf32 gyro, 3xf32 accel. */
+export const IMU_RECORD_SIZE = 32;
+
+export function unpackImu(buf) {
+  if (buf.length % IMU_RECORD_SIZE) {
+    throw new Error(`IMU buffer ${buf.length} is not a multiple of ${IMU_RECORD_SIZE}`);
+  }
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const out = [];
+  for (let o = 0; o + IMU_RECORD_SIZE <= buf.length; o += IMU_RECORD_SIZE) {
+    out.push({
+      t: dv.getFloat64(o, true),
+      gyro: [dv.getFloat32(o + 8, true), dv.getFloat32(o + 12, true), dv.getFloat32(o + 16, true)],
+      accel: [dv.getFloat32(o + 20, true), dv.getFloat32(o + 24, true), dv.getFloat32(o + 28, true)],
+    });
+  }
+  return out;
+}
+
 export const FRAME_RECORD_SIZE = 45;
 
 export function packFrames(frames, cameraKeys) {

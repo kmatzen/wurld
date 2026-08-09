@@ -207,7 +207,8 @@ WurldCam remain fixture/harness-validated pending a real capture.
   `T_WB @ T_BS`, both cameras' OPENCV calibration plus a `body` rig
   (camera-to-body extrinsics; `rig_c2w` derives cam1 poses), imu0 with
   imu-to-cam0 extrinsics and measured rate. Dependency-free mini-YAML parser
-  for `sensor.yaml`. (Video carries cam0 only — one RGB track in SPEC v0.1.)
+  for `sensor.yaml`. (Video carried cam0 only at 0.8; both eyes ship as display
+  streams now — see Unreleased.)
 - **MCAP `/tf`**: FrameTransform world→camera per posed frame, so Foxglove's 3D
   panel places the moving camera correctly.
 - **ChromaPakZ #45 merged** (signal keyframe cadence) and release PR
@@ -342,6 +343,6 @@ WurldCam remain fixture/harness-validated pending a real capture.
 
 Real-device validation (one WurldCam capture + one third-party-app capture
 confirms every convention); LeRobot depth-backend PR upstream (staged
-privately); ChromaPakZ #46 merge + 0.4.0 publish, then pin here; multi-RGB
-tracks per the #47 design once reviewed — at which point the EuRoC importer
-stores both cameras' pixels and SPEC binds frame camera ids to RGB streams.
+privately); ChromaPakZ #46 merge + 0.4.0 publish, then pin here. Multi-RGB
+tracks per the #47 design have since landed, and the EuRoC importer now stores
+both cameras' pixels with SPEC §4.4 binding frame camera ids to RGB streams.

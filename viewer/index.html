@@ -56,6 +56,10 @@
     <input id="scrub" type="range" min="0" max="0" value="0" step="1">
     <span id="frameinfo">–</span>
     <span id="streamPick" hidden></span>
+    <button id="expPoses" title="Every pose as CSV — including binary pose tables, which ffmpeg cannot read">poses.csv</button>
+    <button id="expImu" title="IMU samples as CSV" hidden>imu.csv</button>
+    <button id="expMeta" title="The WURLD metadata document">json</button>
+    <button id="expDepth" title="This frame's metric depth as a float32 .npy (NaN = no return)">depth.npy</button>
     <button id="fit" title="Recenter the 3D view on this frame's geometry">Fit view</button>
     <button id="open">Open file…</button>
   </div>
@@ -69,7 +73,7 @@
 
 <script type="module">
 import { createDecoder, dequantizeInverseDepth } from '../node_modules/chromapakz/src/chromapakz.js';
-import { ID, readWurldTags, unpackFrames as unpackBinaryFrames, readSeekHead,
+import { ID, readWurldTags, unpackFrames as unpackBinaryFrames, unpackImu, readSeekHead,
          segmentBounds, segmentPayloadStart, collectTagsInRange, readCues, spliceFile }
   from './wurld.js';
 
@@ -148,6 +152,7 @@ function applyMetadata(tags, headline) {
     else if (chunks instanceof Uint8Array) doc.frames = unpackBinaryFrames(chunks, cameraKeys);
   }
   state.doc = doc;
+  state.tags = tags;
   // chromapakz's JS decoder skips HDR RGB streams — there is no 10-bit
   // WebCodecs output path yet — so the colour pane would come up silently
   // empty. Say so instead: the geometry still draws, and the file plays in a
@@ -187,6 +192,7 @@ function applyMetadata(tags, headline) {
   }
   state.fitted = false; state.userMoved = false;
   showMeta(headline);
+  refreshExports();
   return doc;
 }
 
@@ -219,6 +225,75 @@ function buildStreamPicker() {
     setFrame(state.cur);
   };
   host.appendChild(sel);
+}
+
+// ---------- exports ----------
+// ffmpeg can read this format's metadata and RGB, but not its binary pose
+// tables or IMU streams (EXTRACTING.md says so). Those are exactly what this
+// page has already parsed, so it can hand them over — no install, no CLI.
+function download(name, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportPosesCsv() {
+  const rows = ['i,t,qw,qx,qy,qz,tx,ty,tz,camera'];
+  for (const f of state.doc?.frames ?? []) {
+    if (f.pose_valid === false) continue;
+    const q = f.q_wxyz, tr = f.tr;
+    rows.push([f.i, f.t, q[0], q[1], q[2], q[3], tr[0], tr[1], tr[2],
+               f.camera ?? '0'].join(','));
+  }
+  download('poses.csv', new Blob([rows.join('\n') + '\n'], { type: 'text/csv' }));
+}
+
+function exportMetadataJson() {
+  download('wurld.json',
+           new Blob([JSON.stringify(state.doc, null, 2)], { type: 'application/json' }));
+}
+
+function exportImuCsv() {
+  const streams = Object.keys(state.tags ?? {}).filter(k => k.startsWith('WURLD_IMU_'));
+  if (!streams.length) return;
+  for (const key of streams) {
+    const id = key.slice('WURLD_IMU_'.length);
+    const rows = ['t,gx,gy,gz,ax,ay,az'];
+    for (const s of unpackImu(state.tags[key])) {
+      rows.push([s.t, ...s.gyro, ...s.accel].join(','));
+    }
+    download(`imu_${id}.csv`, new Blob([rows.join('\n') + '\n'], { type: 'text/csv' }));
+  }
+}
+
+async function exportDepthNpy() {
+  if (!state.frames[state.cur]) await ensureFrame(state.cur);
+  const f = state.frames[state.cur];
+  const meters = f && f.depth ? depthToMeters(f.depth) : null;
+  if (!meters) return;
+  // Minimal .npy v1.0: numpy loads it directly, NaN and all.
+  const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${state.H}, ${state.W}), }`;
+  const pad = 64 - ((10 + header.length + 1) % 64 || 64);
+  const head = header + ' '.repeat(pad) + '\n';
+  const out = new Uint8Array(10 + head.length + meters.byteLength);
+  out.set([0x93, 0x4e, 0x55, 0x4d, 0x50, 0x59, 1, 0], 0);
+  new DataView(out.buffer).setUint16(8, head.length, true);
+  out.set(new TextEncoder().encode(head), 10);
+  out.set(new Uint8Array(meters.buffer, meters.byteOffset, meters.byteLength), 10 + head.length);
+  download(`depth_${String(state.cur).padStart(5, '0')}.npy`,
+           new Blob([out], { type: 'application/octet-stream' }));
+}
+
+function refreshExports() {
+  const posed = (state.doc?.frames ?? []).length > 0;
+  document.getElementById('expPoses').disabled = !posed;
+  document.getElementById('expMeta').disabled = !state.doc;
+  const hasImu = Object.keys(state.tags ?? {}).some(k => k.startsWith('WURLD_IMU_'));
+  const imuBtn = document.getElementById('expImu');
+  imuBtn.hidden = !hasImu;
+  document.getElementById('expDepth').disabled = !state.depthMap;
 }
 
 function showMeta(headline) {
@@ -648,6 +723,10 @@ document.getElementById('play').onclick = () => {
 document.getElementById('scrub').oninput = e => { state.playing = false;
   document.getElementById('play').textContent = '▶'; setFrame(+e.target.value); };
 document.getElementById('fit').onclick = () => { state.userMoved = false; fitView(); };
+document.getElementById('expPoses').onclick = exportPosesCsv;
+document.getElementById('expImu').onclick = exportImuCsv;
+document.getElementById('expMeta').onclick = exportMetadataJson;
+document.getElementById('expDepth').onclick = exportDepthNpy;
 
 // ---------- input ----------
 let dragging = false, panning = false, lx = 0, ly = 0;

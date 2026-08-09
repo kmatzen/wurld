@@ -16,6 +16,13 @@
   intrinsics apply. `Sequence.rgb_streams` / `rgb_for(id)` read them. Poses stay
   single-camera with rig-derived siblings; a lone stream keeps the conventional
   id `rgb` and binds implicitly, so existing files are unaffected.
+- **Viewer exports** — `poses.csv`, `imu_<id>.csv`, `wurld.json` and a per-frame
+  `depth_NNNNN.npy` (float32 metres, NaN where there was no return). These cover
+  precisely what ffmpeg cannot reach: binary pose tables and IMU streams. Poses
+  come through the full SPEC §9 precedence chain, so binary tables export like
+  JSON ones, and unposed frames are omitted rather than written as identity.
+- **Camera picker in the viewer** — appears only for multi-stream files, and
+  drives both the RGB pane and the point-cloud colours.
 - **HDR display track (SPEC §4.5)** — `wl.write(..., hdr={"transfer": "pq"})`;
   `Sequence.hdr` reports the signalling and `Sequence.rgb` returns `uint16`
   10-bit codes. Display-referred, and explicitly not a substitute for a
@@ -30,6 +37,24 @@ Whether this beats EXR depends on temporal coherence: measured against EXR/ZIP,
 13.5x smaller for a static denoised render, 1.5x when the camera moves, and
 0.8x — *larger* — for raw path-traced output with per-frame Monte Carlo noise.
 Denoise before archiving.
+
+### Changed
+
+- **EuRoC importer carries both eyes.** cam0 and cam1 ship as display streams
+  keyed by camera id, now that multi-stream exists; `--mono` (or `stereo=False`)
+  restores the previous single-track output, which is byte-identical in layout —
+  one track still named `rgb`. Calibration for both cameras and the `body` rig
+  are recorded either way.
+- **EuRoC poses are interpolated, not snapped.** Ground truth is 200 Hz on a
+  clock unrelated to the 20 Hz shutter, so the nearest sample sat up to 2.5 ms
+  away — about a millimetre of systematic error on every frame. Poses now
+  interpolate linearly on position and SLERP on rotation; frames the ground
+  truth does not bracket stay `pose_valid: false` rather than being clamped to
+  the nearest pose, which would invent a stationary camera.
+- EuRoC nanosecond timestamps parse as integers before conversion. The absolute
+  epoch in float64 seconds still quantises to ~238 ns — inherent to the
+  representation, far below sensor accuracy — so cam0/cam1 pairing compares the
+  integer nanoseconds instead.
 
 
 ## 1.1.1 — 2026-08-06

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   ID, packFrames, unpackFrames, FRAME_RECORD_SIZE, buildTags,
-  collectTagsInRange, readVint, cat,
+  collectTagsInRange, readVint, cat, unpackImu, IMU_RECORD_SIZE,
 } from '../viewer/wurld.js';
 
 // readWurldTags expects a whole file (it descends through Segment); these
@@ -63,4 +63,27 @@ test('vints decode to their documented widths', () => {
   assert.equal(readVint(new Uint8Array([0x40, 0x01]), 0)[0], 1);  // 2-byte, same value
   assert.equal(readVint(new Uint8Array([0x40, 0x01]), 0)[2], 2);  // width reported
   assert.equal(ID.CLUSTER, 0x1f43b675);
+});
+
+
+// The viewer exports IMU as CSV because ffmpeg cannot reach these tags at all
+// (EXTRACTING.md). Layout must stay lockstep with wurld/container.py's
+// _IMU_RECORD = struct.Struct("<d3f3f").
+test('unpackImu reads the 32-byte record layout', () => {
+  const buf = new Uint8Array(2 * IMU_RECORD_SIZE);
+  const dv = new DataView(buf.buffer);
+  dv.setFloat64(0, 1.5, true);
+  [0.1, 0.2, 0.3, 0.0, 0.0, 9.81].forEach((v, k) => dv.setFloat32(8 + 4 * k, v, true));
+  dv.setFloat64(IMU_RECORD_SIZE, 1.505, true);
+
+  const got = unpackImu(buf);
+  assert.equal(got.length, 2);
+  assert.equal(got[0].t, 1.5);
+  assert.equal(got[1].t, 1.505);
+  assert.ok(Math.abs(got[0].gyro[1] - 0.2) < 1e-6);
+  assert.ok(Math.abs(got[0].accel[2] - 9.81) < 1e-5);
+});
+
+test('unpackImu rejects a truncated buffer rather than inventing a sample', () => {
+  assert.throws(() => unpackImu(new Uint8Array(IMU_RECORD_SIZE + 7)), /multiple of 32/);
 });

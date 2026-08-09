@@ -162,6 +162,39 @@ on-device, or an existing app's output is imported (`wurld convert` handles
 Record3D, Polycam, Stray, TUM, COLMAP, nerfstudio, EuRoC), and the result feeds
 scenario 2 or 4. The value is the count: seven input layouts, one output.
 
+Worked recipe — **EuRoC MAV**, the standard visual-inertial benchmark, and the
+one import that exercises stereo, rigs and IMU at once:
+
+```
+wurld convert /path/to/V1_01_easy out.wl.webm      # both eyes
+wurld convert /path/to/V1_01_easy out.wl.webm --mono
+```
+
+We do not host converted EuRoC: it is CC BY-NC-SA 3.0, so this is a recipe you
+point at your own download, not a dataset we redistribute. Four things the
+conversion has to get right, and each is a place a naive importer goes wrong:
+
+- **Ground truth is the body pose, not the camera.** `state_groundtruth_estimate0`
+  gives T_WB; the camera pose is `T_WB @ T_BS` with T_BS from `cam0/sensor.yaml`.
+  Skip that and every pose is off by a fixed ~7 cm and a rotation — a constant
+  offset that trajectory metrics happily absorb without flagging.
+- **Ground truth is 200 Hz on a clock unrelated to the 20 Hz shutter.** Poses are
+  interpolated (linear position, SLERP rotation), not snapped to the nearest
+  sample, which was worth about a millimetre per frame.
+- **Ground truth does not cover the whole sequence.** Uncovered images are
+  written `pose_valid: false`; clamping them invents a stationary camera.
+- **The images are distorted.** The camera model is OPENCV with
+  `[fx, fy, cx, cy, k1, k2, p1, p2]`, not PINHOLE.
+
+Both cameras' pixels ride as display streams keyed by camera id; poses are stored
+for `"0"` and `"1"` derives through the `body` rig, so the ~11 cm baseline cannot
+drift away from the trajectory. EuRoC has no depth, so the file has no signal
+planes at all — a wurld file is not obliged to carry one.
+
+Tested against a fixture in the ASL layout with the genuine V1_01 calibration
+(`tests/test_euroc.py`), including a check that would fail if the T_BS
+composition were dropped. It has not been run against the real download.
+
 ### 7. Robot-learning episodes
 
 LeRobot v3 stores vision as MP4 and state/action as Parquet. wurld is

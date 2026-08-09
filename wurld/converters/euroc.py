@@ -11,10 +11,31 @@ Layout (per sequence, e.g. ``MH_01_easy/mav0``):
     state_groundtruth_estimate0/data.csv   ns, p_RS_R xyz, q_RS wxyz, ...
 
 EuRoC cameras use the standard CV convention (RDF, z forward), so no axis flip:
-``c2w(cam0) = T_WB @ T_BS(cam0)``. Both cameras' calibration and the
-camera-to-body extrinsics are recorded (cameras "0"/"1" + a ``body`` rig), but
-only cam0's pixels are carried — SPEC v0.1 files have one RGB track. The IMU
-stream ships with imu-to-cam0 extrinsics.
+``c2w(cam0) = T_WB @ T_BS(cam0)``. Ground truth is the *body* pose, so that
+composition is not optional — omitting it leaves a fixed ~7 cm offset and a
+rotation that no trajectory metric will flag as an error.
+
+Both cameras' pixels are carried as display streams keyed by camera id (SPEC
+§4.4), with calibration and camera-to-body extrinsics in a ``body`` rig. Poses
+are stored for camera "0" only; camera "1" derives through the rig, so the
+baseline cannot drift away from the trajectory. Pass ``stereo=False`` for cam0
+alone, which is what this converter did before multi-stream existed.
+
+Ground truth runs at 200 Hz against 20 Hz images on an unrelated clock, so poses
+are interpolated to image timestamps — linear on position, SLERP on rotation —
+rather than snapped to the nearest sample. At the very ends, and across gaps in
+the ground truth, a frame is accepted only if a sample lies within ``max_dt``
+(20 ms by default) — otherwise it is written ``pose_valid: false``. Clamping an
+uncovered stretch to the nearest pose would invent a stationary camera that
+never existed.
+
+The IMU stream ships with imu-to-cam0 extrinsics, at its own 200 Hz rate.
+
+Timestamps keep EuRoC's absolute epoch. Note the floor that implies: ~1.4e9
+seconds in float64 resolves to about 238 ns, so times carry that quantisation no
+matter how they are parsed. It is far below any of these sensors' accuracy, but
+it is why exact timestamp equality holds only in the integer nanoseconds, which
+is what the cam0/cam1 pairing below compares.
 """
 
 from __future__ import annotations
@@ -62,6 +83,41 @@ def _read_cam_yaml(path: Path) -> tuple[container.Camera, np.ndarray]:
     return cam, _yaml_t_bs(text)
 
 
+def _slerp(q0: np.ndarray, q1: np.ndarray, u: float) -> np.ndarray:
+    """Shortest-arc quaternion interpolation; lerps when the arc is negligible."""
+    q0 = q0 / np.linalg.norm(q0)
+    q1 = q1 / np.linalg.norm(q1)
+    dot = float(np.dot(q0, q1))
+    if dot < 0.0:                      # same rotation, opposite hemisphere
+        q1, dot = -q1, -dot
+    if dot > 0.9995:
+        q = q0 + u * (q1 - q0)
+        return q / np.linalg.norm(q)
+    th = np.arccos(dot) * u
+    q2 = q1 - q0 * dot
+    q2 /= np.linalg.norm(q2)
+    return q0 * np.cos(th) + q2 * np.sin(th)
+
+
+def _interpolate_body_pose(gt_t, gt_p, gt_q, t, max_dt):
+    """T_WB at time t, or None when the ground truth does not cover it."""
+    j = int(np.searchsorted(gt_t, t))
+    if j == 0 or j >= len(gt_t):
+        # Outside the bracket entirely: accept only if a sample is close enough,
+        # so a sequence whose GT starts a hair late is not thrown away.
+        k = 0 if j == 0 else len(gt_t) - 1
+        if abs(gt_t[k] - t) > max_dt:
+            return None
+        return conventions.pose_to_matrix(gt_q[k], gt_p[k])
+    i = j - 1
+    if gt_t[j] - gt_t[i] > 2 * max_dt:  # a real gap in the ground truth
+        return None
+    span = gt_t[j] - gt_t[i]
+    u = 0.0 if span <= 0 else (t - gt_t[i]) / span
+    return conventions.pose_to_matrix(_slerp(gt_q[i], gt_q[j], u),
+                                      gt_p[i] + u * (gt_p[j] - gt_p[i]))
+
+
 def _read_csv(path: Path) -> list[list[str]]:
     rows = []
     with open(path) as f:
@@ -84,6 +140,7 @@ def from_euroc(
     out_path: str | Path,
     max_dt: float = 0.02,
     rgb_kbps: int = 4000,
+    stereo: bool = True,
 ) -> Path:
     base = _mav_dir(Path(seq_dir))
 
@@ -100,30 +157,43 @@ def from_euroc(
 
     # ground truth: t_ns, p xyz, q wxyz (body-to-world)
     gt_rows = _read_csv(base / "state_groundtruth_estimate0" / "data.csv")
-    gt_t = np.array([float(r[0]) * 1e-9 for r in gt_rows])
-    gt = [(np.array([float(v) for v in r[1:4]]),
-           np.array([float(v) for v in r[4:8]])) for r in gt_rows]
+    # int() first: EuRoC stamps are ~1.4e18 ns, past float64's exact-integer
+    # range, and the pairing below compares them for equality.
+    gt_t = np.array([int(r[0]) * 1e-9 for r in gt_rows])
+    gt_p = np.array([[float(v) for v in r[1:4]] for r in gt_rows])
+    gt_q = np.array([[float(v) for v in r[4:8]] for r in gt_rows])
 
-    frames, rgb = [], []
-    for i, row in enumerate(_read_csv(base / "cam0" / "data.csv")):
-        t = float(row[0]) * 1e-9
-        img = Image.open(base / "cam0" / "data" / row[1]).convert("RGBA")
-        rgb.append(np.asarray(img))
-        gi = int(np.argmin(np.abs(gt_t - t)))
-        if abs(gt_t[gi] - t) < max_dt:
-            p, q_wxyz = gt[gi]
-            t_wb = conventions.pose_to_matrix(q_wxyz, p)
+    cam1_by_ns = {}
+    want_stereo = stereo and "1" in cameras and (base / "cam1" / "data.csv").exists()
+    if want_stereo:
+        cam1_by_ns = {int(r[0]): r[1] for r in _read_csv(base / "cam1" / "data.csv")}
+
+    frames, rgb, rgb1, skipped = [], [], [], 0
+    for row in _read_csv(base / "cam0" / "data.csv"):
+        ns = int(row[0])
+        if want_stereo and ns not in cam1_by_ns:
+            skipped += 1          # unpaired frame; a stereo stream needs both eyes
+            continue
+        t = ns * 1e-9
+        rgb.append(np.asarray(Image.open(base / "cam0" / "data" / row[1]).convert("RGBA")))
+        if want_stereo:
+            rgb1.append(np.asarray(
+                Image.open(base / "cam1" / "data" / cam1_by_ns[ns]).convert("RGBA")))
+
+        i = len(frames)
+        t_wb = _interpolate_body_pose(gt_t, gt_p, gt_q, t, max_dt)
+        if t_wb is None:
+            frames.append(container.Frame(i=i, t=t, pose_valid=False))
+        else:
             c2w = t_wb @ t_bs0  # EuRoC cameras are already RDF: no axis flip
             q, tr = conventions.matrix_to_pose(c2w)
             frames.append(container.Frame(i=i, t=t, camera="0", q_wxyz=tuple(q), tr=tuple(tr)))
-        else:
-            frames.append(container.Frame(i=i, t=t, pose_valid=False))
 
     imu = []
     if (base / "imu0" / "data.csv").exists():
         rows = _read_csv(base / "imu0" / "data.csv")
         samples = np.array(
-            [[float(r[0]) * 1e-9, *(float(v) for v in r[1:7])] for r in rows], dtype=np.float64
+            [[int(r[0]) * 1e-9, *(float(v) for v in r[1:7])] for r in rows], dtype=np.float64
         )
         t_bs_imu = _yaml_t_bs((base / "imu0" / "sensor.yaml").read_text())
         imu_to_cam0 = conventions.invert_pose(t_bs0) @ t_bs_imu
@@ -147,7 +217,7 @@ def from_euroc(
         out_path,
         cameras=cameras,
         frames=frames,
-        rgb=np.stack(rgb),
+        rgb=({"0": np.stack(rgb), "1": np.stack(rgb1)} if want_stereo else np.stack(rgb)),
         rigs={"body": {"cameras": rig_cams,
                        "description": "EuRoC T_BS calibration: camera-to-body transforms"}},
         imu=imu,
@@ -157,9 +227,11 @@ def from_euroc(
             "metric_scale": True,
             "gravity_in_world": [0.0, 0.0, -1.0],  # EuRoC world (Leica/Vicon) is z-up
             "description": (
-                f"EuRoC MAV import from {base}; video carries cam0 only "
-                "(SPEC v0.1 single RGB track) — cam1 calibration and the "
-                "camera-to-body rig are recorded for stereo consumers"
+                f"EuRoC MAV import from {base}; "
+                + ("both eyes carried as display streams \"0\"/\"1\""
+                   if want_stereo else
+                   "video carries cam0 only (stereo=False)")
+                + "; poses stored for camera \"0\", camera \"1\" derives from the body rig"
             ),
         },
     )

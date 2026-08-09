@@ -199,4 +199,19 @@ capture drops frames, and the gaps are information, not error.
 - **Rig extrinsics** — these *are* in the JSON document, under `rigs`.
 
 For those, either `pip install wurld` or use the browser viewer, which needs no
-install at all.
+install at all. The viewer exports exactly the pieces ffmpeg cannot reach:
+
+| Button | File | Contents |
+|---|---|---|
+| `poses.csv` | `poses.csv` | `i,t,qw,qx,qy,qz,tx,ty,tz,camera` — one row per **posed** frame, read through the full SPEC §9 precedence chain, so binary tables come out the same as JSON ones |
+| `imu.csv` | `imu_<id>.csv` | `t,gx,gy,gz,ax,ay,az` at the IMU's own rate, one file per stream; the button is hidden when the file has no IMU |
+| `json` | `wurld.json` | the whole `WURLD` document, including `rigs` and `value_map` |
+| `depth.npy` | `depth_NNNNN.npy` | the current frame's **metric** depth, `float32` metres, `NaN` where there was no return — `np.load` reads it directly |
+
+Unposed frames are omitted from `poses.csv` rather than written as identity, and
+the `i` column keeps the original frame numbering, so a gap in it is visible
+rather than silently renumbered.
+
+The depth export is per-frame by design: it is for checking a frame against
+another tool, not for bulk extraction. For a whole sequence use the Python
+reader, which streams instead of holding every frame in a tab.
