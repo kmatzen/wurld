@@ -15,6 +15,11 @@
   tracked the longest member (291 MB on the fixture above) and briefly doubled
   at member boundaries. It now uses the bounded iterator and releases each
   member before opening the next: **581 MB -> 69 MB**.
+- **Random access had the same defect, and worse.** `remote.fetch_frames` (and
+  so `Sequence.fetch_frames`, ranged HTTP reads, and `Collection.frame`) spliced
+  the original header too, so fetching *one* frame from a 600-frame 320x240 file
+  allocated **279 MB**; now **16.4 MB**. Partial decode exists to make reading a
+  few frames of a long file cheap, which it was not.
 - **Metadata-only collection iteration read pixel bytes.** It now stops at the
   header region: **291 MB -> 1.0 MB**.
 - Frames yielded from a Cluster are copied rather than aliased, so a shuffle

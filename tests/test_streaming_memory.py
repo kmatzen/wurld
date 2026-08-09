@@ -193,3 +193,28 @@ def test_metadata_only_iteration_does_not_read_pixels(long_file, tmp_path):
     assert meta_peak < 0.1 * pixel_peak, (
         f"metadata {meta_peak/1e6:.2f} MB vs pixels {pixel_peak/1e6:.2f} MB — "
         "metadata iteration appears to be decoding")
+
+
+def test_random_access_costs_a_cluster_not_a_file(long_file):
+    """Fetching one frame must not allocate for the whole sequence.
+
+    The same header-splice defect as streaming, but sharper: partial decode
+    exists precisely so that reading three frames of a long file is cheap, and
+    it was allocating the full sequence's buffers to return one frame.
+    """
+    import tracemalloc
+
+    whole = N * W * H * 4 + N * W * H * 2 * 2
+    seq = wl.read(long_file)
+    tracemalloc.start()
+    got = seq.fetch_frames([N // 2])
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert list(got) == [N // 2]
+    assert peak < 0.5 * whole, f"peak {peak/1e6:.1f} MB for one frame"
+
+    full = wl.read(long_file)._decode()
+    assert np.array_equal(got[N // 2]["rgb"], full["rgb"][N // 2])
+    assert np.array_equal(got[N // 2]["signals"]["depth"],
+                          full["signals"]["depth"][N // 2])
