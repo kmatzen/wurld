@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from . import require_8bit_pixels
 from .. import container, conventions
 
 # COLMAP model_id -> (name, n_params); subset wurld supports.
@@ -188,6 +189,7 @@ def to_colmap(wl_path: str | Path, out_dir: str | Path, write_images: bool = Tru
                 "images, so only the primary (%s) is exported",
                 wl_path, len(seq.rgb_streams), ", ".join(seq.rgb_streams),
                 seq.rgb_streams[0])
+        require_8bit_pixels(seq, 'a COLMAP workspace')
         rgb = seq.rgb
     for n, f in enumerate(seq.frames, start=1):
         name = f"frame_{f.i:06d}.png"

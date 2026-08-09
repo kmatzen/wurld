@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from . import require_8bit_pixels
 from .. import container, conventions
 
 DEPTH_SCALE = 1.0 / 5000.0  # meters per raw unit
@@ -147,6 +148,7 @@ def to_tum(wl_path: str | Path, out_dir: str | Path) -> Path:
             "images, so only the primary (%s) is exported",
             wl_path, len(seq.rgb_streams), ", ".join(seq.rgb_streams),
             seq.rgb_streams[0])
+    require_8bit_pixels(seq, 'TUM RGB-D')
     rgb = seq.rgb
     depth_meta = seq.signal_meta("depth")
     depth_raw = seq.signal(depth_meta.id) if depth_meta else None

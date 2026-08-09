@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from . import require_8bit_pixels
 from .. import container, conventions
 
 DEPTH_UNIT = 1.0e-3  # nerfstudio depth_unit_scale_factor default: mm -> m
@@ -106,6 +107,7 @@ def to_transforms(wl_path: str | Path, out_dir: str | Path) -> Path:
             "images, so only the primary (%s) is exported",
             wl_path, len(seq.rgb_streams), ", ".join(seq.rgb_streams),
             seq.rgb_streams[0])
+    require_8bit_pixels(seq, 'a nerfstudio transforms.json export')
     rgb = seq.rgb
     depth_meta = seq.signal_meta("depth")
     depth_raw = seq.signal(depth_meta.id) if depth_meta else None

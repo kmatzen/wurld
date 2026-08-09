@@ -37,3 +37,22 @@ def detect(path: str | Path) -> str | None:
             if any((base / f"cameras.{ext}").exists() for ext in ("bin", "txt")):
                 return "colmap"
     return None
+
+
+def require_8bit_pixels(seq, fmt: str) -> None:
+    """Refuse an HDR display track for a format that stores 8-bit images.
+
+    PIL's own complaint — "Cannot handle this data type: (1, 1, 3), <u2" — names
+    neither the file, the format, nor the way out. An HDR track decodes to
+    uint16 (10-bit PQ codes), and PNG/JPEG here hold 8 bits, so the export
+    cannot proceed; saying which of those facts collided is the least this can
+    do.
+    """
+    if seq.hdr is None:
+        return
+    raise ValueError(
+        f"{seq.path} carries an HDR display track ({seq.hdr.get('transfer', '?')}, "
+        f"{seq.hdr.get('bits', 10)}-bit), and {fmt} stores 8-bit images. Tone-map "
+        "the display track first, or export without images if the format allows "
+        "it — wurld will not silently crush 10-bit display-referred codes to 8 bits."
+    )

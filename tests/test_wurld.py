@@ -247,3 +247,32 @@ def test_single_camera_export_warns_when_a_stream_is_dropped(tmp_path, caplog):
         tum_conv.to_tum(src, tmp_path / "out")
     assert any("display streams" in r.getMessage() for r in caplog.records), \
         "exporting a stereo file to a single-camera format said nothing"
+
+
+def test_hdr_export_to_an_8bit_format_says_why(tmp_path):
+    """PIL's "Cannot handle this data type: (1, 1, 3), <u2" names nothing useful."""
+    import numpy as np
+
+    from wurld.converters import colmap as colmap_conv
+    from wurld.converters import nerfstudio as ns_conv
+    from wurld.converters import tum as tum_conv
+
+    W2, H2 = 32, 24
+    src = tmp_path / "hdr.wl.webm"
+    codes = np.stack([np.full((H2, W2, 4), 400 + 40 * i, np.uint16) for i in range(3)])
+    f = 1.1 * W2
+    wl.write(src,
+             cameras={"0": wl.Camera("PINHOLE", W2, H2, [f, f, W2 / 2, H2 / 2])},
+             frames=[wl.Frame(i=i, t=i / 30, camera="0", q_wxyz=(1.0, 0.0, 0.0, 0.0),
+                              tr=(0.0, 0.0, 1.0)) for i in range(3)],
+             rgb=codes, hdr={"transfer": "pq"}, world={"metric_scale": True}, fps=30)
+    assert wl.read(src).rgb.dtype == np.uint16, "the fixture must be HDR"
+
+    for fn, out in [(tum_conv.to_tum, "tum"), (ns_conv.to_transforms, "ns"),
+                    (colmap_conv.to_colmap, "colmap")]:
+        with pytest.raises(ValueError) as exc:
+            fn(src, tmp_path / out)
+        message = str(exc.value)
+        assert "HDR display track" in message
+        assert "8-bit" in message
+        assert "Tone-map" in message

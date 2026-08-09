@@ -62,6 +62,11 @@ pull-based and never had the defect.
   rig, so a stereo pair keeps its calibrated baseline (measured on real EuRoC:
   11.01 cm, constant to four decimals). Found by exporting a real stereo
   sequence and noticing only one `image_raw` topic came out.
+- **Exporting an HDR file to TUM, COLMAP or nerfstudio died in PIL** with
+  "Cannot handle this data type: (1, 1, 3), <u2", which names neither the file
+  nor the format nor a way out. It now refuses with all three: those formats
+  store 8-bit images, an HDR track decodes to 10-bit codes, and wurld will not
+  silently crush one into the other.
 - **An HDR file exported to ROS was labelled `rgb8` while carrying uint16.**
   The declared layout was half the actual byte count, so a consumer read a
   corrupted double-width image and nothing raised. HDR images now go out as
