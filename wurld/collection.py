@@ -32,6 +32,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Iterator
 
+import numpy as np
+
 from . import container, remote
 
 MANIFEST_VERSION = 1
@@ -283,6 +285,11 @@ class Collection:
             self._open_index = member_index
         return self._open_seq
 
+    def _release(self) -> None:
+        """Drop the cached member so the next one is not decoded alongside it."""
+        self._open_index = None
+        self._open_seq = None
+
     def frame(self, index: int, *, fields: Iterable[str] = ()) -> dict:
         """One frame by global index, decoding as little as the fields allow."""
         mi, li = self.locate(index)
@@ -352,25 +359,48 @@ class Collection:
         rng = random.Random(shuffle) if shuffle is not None else None
         buf: list[dict] = []
 
+        def emit(item):
+            if shuffle_buffer > 1 and rng is not None:
+                buf.append(item)
+                if len(buf) >= shuffle_buffer:
+                    return [buf.pop(rng.randrange(len(buf)))]
+                return []
+            return [item]
+
         for mi, member in self.iter_members(shard=shard, shuffle=shuffle):
             uri = self.resolve(member)
             if _is_remote(uri):
                 raise ValueError(f"{uri} is remote; iter_frames needs local members")
-            seq = self.sequence(mi)
-            decoded = seq._decode() if want else None
 
-            for li, fr in enumerate(seq.frames):
+            if not want:
+                # Metadata only: read the header region and stop before the
+                # Clusters. Pulling a whole file into memory to report its poses
+                # costs the file's size for nothing.
+                hdr = remote.fetch_header(remote.file_fetcher(Path(uri)))
+                for li, fr in enumerate(hdr.frames):
+                    if posed_only and not fr.pose_valid:
+                        continue
+                    yield from emit(_pose_fields(fr, member, mi, li))
+                continue
+
+            # Release the previous member first: holding it while the next one
+            # decodes doubles peak memory at every boundary.
+            self._release()
+            seq = self.sequence(mi)
+            signals, frames = seq.signals, seq.frames
+
+            # One Cluster at a time (SPEC §9.1 cluster independence) rather than
+            # a whole-member decode, so memory tracks the cluster size, not the
+            # length of the longest member.
+            for li, payload in seq.iter_frames():
+                if li >= len(frames):
+                    break
+                fr = frames[li]
                 if posed_only and not fr.pose_valid:
                     continue
                 item = _pose_fields(fr, member, mi, li)
-                if want:
-                    _fill_from_whole(item, decoded, seq, li, want)
-                if shuffle_buffer > 1 and rng is not None:
-                    buf.append(item)
-                    if len(buf) >= shuffle_buffer:
-                        yield buf.pop(rng.randrange(len(buf)))
-                else:
-                    yield item
+                _fill_from_partial(item, payload, signals, want)
+                yield from emit(item)
 
         if rng is not None:
             rng.shuffle(buf)
@@ -452,7 +482,9 @@ def _wanted_signals(want: set[str], signals) -> list:
 
 def _fill_from_partial(item: dict, part: dict, signals, want: set[str]) -> None:
     if "rgb" in want and part.get("rgb") is not None:
-        item["rgb"] = part["rgb"]
+        # Copy: the decoded array is a view into a whole Cluster, and a shuffle
+        # buffer holding views would pin every cluster it has seen.
+        item["rgb"] = np.array(part["rgb"], copy=True)
     raw = part.get("signals") or {}
     for s in _wanted_signals(want, signals):
         codes = raw.get(s.id)

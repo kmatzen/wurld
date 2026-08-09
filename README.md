@@ -300,6 +300,11 @@ It re-reads headers, which is the same cheap read that built the manifest.
 `--checksum` additionally compares recorded hashes, which is the only way to see
 a change that leaves the header identical.
 
+Measured at 10,000 members (`scripts/bench_collection.py`): index 1.9 s, manifest
+3.4 MiB, `locate()` 0.46 µs, verify 1.0 s, streaming 31,700 frames/s for metadata
+and 8,400 with pixels — peak RSS 58.7 MB, flat. Streaming holds a Cluster, not a
+file: see USE_CASES scenario 7 for what measuring that turned up.
+
 A collection asserts nothing about how members relate in space or time; that is
 the separate scene-manifest concern reserved in SPEC §11.
 

@@ -228,6 +228,34 @@ itself across workers and distributed ranks) and `WurldFrameDataset` (map-style,
 for evaluation — slower per sample because a random index still costs a cluster
 decode).
 
+**Measured at the scale the design claims** (`scripts/bench_collection.py`),
+10,000 members x 4 frames on an M-series laptop:
+
+| | |
+|---|---|
+| index (build the manifest) | 1.93 s — 0.19 ms/member |
+| manifest on disk | 3.4 MiB |
+| load the manifest | 52 ms |
+| `locate()` | 0.46 µs/lookup |
+| stream metadata | 31,700 frames/s |
+| stream rgb+depth | 8,400 frames/s |
+| `verify()` | 1.03 s — 0.10 ms/member |
+| peak RSS | 58.7 MB, flat across every phase |
+
+Read those as scaling in member count, not in pixels: the corpus is deliberately
+tiny per member so that ten thousand of them fit in a test run. Throughput on
+real captures is set by decode, which is `stream rgb+depth` above measured on
+32x24 frames — a 640x480 capture decodes roughly 400x fewer frames per second.
+
+Getting those numbers required fixing what they exposed. Streaming a collection
+held **one whole member decoded** (291 MB for a 600-frame 320x240 member, 581 MB
+at member boundaries where two were briefly live), because it called the
+whole-file decode rather than `Sequence.iter_frames`. And that bounded iterator
+was not bounded either: a spliced single-Cluster file still advertised the whole
+sequence's frame count, so chromapakz sized its output buffers for the entire
+file — 277 MB per Cluster instead of 14.7 MB. Both are fixed; pixels are
+bit-identical either way, which is why nothing failed while it was wrong.
+
 A collection asserts *nothing* about how members relate in space or time. That is
 the separate scene-manifest concern reserved in SPEC §11, and conflating the two
 would invite a reader to compare poses across unrelated captures.

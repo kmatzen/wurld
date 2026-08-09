@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Streaming held a whole file, not a Cluster.** `Sequence.iter_frames`
+  documented bounded memory and delivered it for packets but not for buffers: a
+  spliced single-Cluster file still advertised the whole sequence's frame count,
+  so chromapakz sized its output arrays for the entire file. Measured on a
+  600-frame 320x240 sequence: **277 MB per Cluster, now 14.7 MB**. The spliced
+  header now carries the Cluster's own frame count, and drops the wurld tags a
+  decoder never reads.
+- **`Collection.iter_frames` used the whole-member decode**, so peak memory
+  tracked the longest member (291 MB on the fixture above) and briefly doubled
+  at member boundaries. It now uses the bounded iterator and releases each
+  member before opening the next: **581 MB -> 69 MB**.
+- **Metadata-only collection iteration read pixel bytes.** It now stops at the
+  header region: **291 MB -> 1.0 MB**.
+- Frames yielded from a Cluster are copied rather than aliased, so a shuffle
+  buffer cannot pin every Cluster it has seen.
+
+Nothing failed while these were wrong — frames were correct and in order, just
+an order of magnitude more expensive than claimed. `tests/test_streaming_memory.py`
+asserts the bounds, and `scripts/bench_collection.py` produces the numbers.
+
+### Added
+
+- **`scripts/bench_collection.py`** — measures a collection at scale, each case
+  in its own process so peak RSS is attributable. Results for 10,000 members are
+  in USE_CASES scenario 7.
+
 ## 1.2.0 — 2026-08-08
 
 Three reader implementations that provably agree, a C++ writer, datasets built
