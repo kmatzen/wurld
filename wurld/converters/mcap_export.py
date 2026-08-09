@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from . import require_8bit_pixels
 from .. import container, conventions
 
 _TS = {"type": "object", "properties": {"sec": {"type": "integer"}, "nsec": {"type": "integer"}}}
@@ -102,6 +103,7 @@ def to_mcap(wl_path: str | Path, out_path: str | Path, jpeg_quality: int = 90) -
 
     seq = container.read(wl_path)
     out_path = Path(out_path)
+    require_8bit_pixels(seq, 'a Foxglove MCAP log (jpeg images)')
     rgb = seq.rgb
     depth_meta = seq.signal_meta("depth")
     depth_raw = seq.signal(depth_meta.id) if depth_meta else None

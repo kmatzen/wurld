@@ -62,6 +62,14 @@ pull-based and never had the defect.
   rig, so a stereo pair keeps its calibrated baseline (measured on real EuRoC:
   11.01 cm, constant to four decimals). Found by exporting a real stereo
   sequence and noticing only one `image_raw` topic came out.
+- **`tests/test_export_matrix.py`** — every exporter against every shape of
+  legal file (unposed frames, no display track, stereo, rig+IMU, HDR). Each side
+  was covered and the combination was not, which is how four separate export
+  defects survived. The invariant is deliberately weak: succeed, or refuse with
+  a `ValueError` that explains itself — never an internal `TypeError` that reads
+  as a wurld bug when the request was impossible.
+- **The Foxglove MCAP export had the HDR defect too** and was missed in the
+  first pass; the matrix caught it.
 - **Feed-forward output could not be exported to nerfstudio or COLMAP at all.**
   Both raised "frame 9: pose not valid" on the unlocalised frames that
   `pose_valid=False` exists to represent — so scenario 1 could not feed scenario
