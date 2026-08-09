@@ -130,9 +130,19 @@ model that renders mirrored, and nothing downstream catches it.
 
 Ground truth and estimate become the same kind of artefact, and `wurld validate`
 checks both. Conventions convert once in the exporter rather than in every
-consumer. Verified on the real TUM `freiburg1_desk` sequence: 572/573 poses
-associated within 10 ms, **0.000 mm** translation error against the original
-`groundtruth.txt`.
+consumer. Verified against the real TUM `freiburg1_desk` download — not a
+fixture — and now re-verified by `tests/test_real_tum.py` rather than measured
+once: 573 frames, 572 associated within 10 ms, **0.000000000 mm** translation
+error and 3.4e-06 deg rotation error against the original `groundtruth.txt`,
+with poses stored *verbatim* rather than merely close. Depth stays within
+2e-3 relative of the source 16-bit PNGs, and TUM's `0` (no return) stays NaN
+rather than becoming a distance. The result is 3.2x smaller than the source
+JPEG+PNG frames on disk (366 MB -> 114 MB).
+
+Fixtures cannot establish this. A synthetic TUM directory is written from the
+same understanding of TUM's conventions that the importer reads it with, so the
+two agree by construction. The dataset is CC BY 4.0 and is not redistributed;
+`scripts/fetch_tum.sh` gets it, and the test skips without it.
 
 ### ▶ 4. Robot rig with IMU — `examples/04_robot_rig_imu.py`
 

@@ -344,7 +344,10 @@ SPEC declared **1.0** (frozen semantics; 1.x additions are additive-only, and
 on Linux+macOS plus a viewer parity job), and packaging validated (sdist+wheel
 build clean, twine-checked, fresh-venv install + CLI smoke). Multi-RGB pixel
 storage remains gated on the ChromaPakZ #47 design review; phone importers and
-WurldCam remain fixture/harness-validated pending a real capture.
+WurldCam remain fixture/harness-validated pending a real capture. TUM is the
+exception and is checked against the real download by `tests/test_real_tum.py`
+(`scripts/fetch_tum.sh` fetches it; the test skips without it, and a weekly CI
+job runs it).
 
 ## v0.9: bounded-memory iteration, trim, auto-lazy
 

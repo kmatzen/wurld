@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`tests/test_real_tum.py`** — the TUM claim quoted in three documents was a
+  one-off measurement that nothing re-checked. It now runs against the real
+  `freiburg1_desk` download: 572/573 poses associated within 10 ms at
+  **0.000000000 mm**, poses stored verbatim rather than merely close, depth
+  within 2e-3 relative of the source 16-bit PNGs, and TUM's `0` (no return)
+  still NaN. `scripts/fetch_tum.sh` fetches the sequence (CC BY 4.0, not
+  redistributed); the tests skip without it, and a weekly CI job runs them.
+
 ## 1.2.1 — 2026-08-09
 
 Memory fixes for streaming and random access. No format change, no API change;

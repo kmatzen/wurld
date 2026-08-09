@@ -1,0 +1,53 @@
+name: real data
+
+# Separate from `test` on purpose. This fetches 328 MB of TUM RGB-D and takes
+# minutes, which is the wrong tax on every pull request — but the claim it
+# guards ("572/573 poses, 0.000 mm, depth bit-exact") is quoted in README,
+# USE_CASES and LANDSCAPE, and was previously a one-off measurement nothing
+# re-checked. Weekly, plus on demand, keeps it honest without slowing the loop.
+#
+# It can also fail for reasons that are not our fault — the dataset host going
+# away is not a broken converter — so read a failure here before believing it.
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"      # Mondays, 05:23 UTC
+  workflow_dispatch: {}
+
+jobs:
+  tum:
+    name: TUM freiburg1_desk (real download)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache the sequence
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/wurld-data
+          key: tum-rgbd_dataset_freiburg1_desk-v1
+
+      - name: Fetch it
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: DEST=~/wurld-data scripts/fetch_tum.sh
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Convert and check against the source
+        run: pytest tests/test_real_tum.py -q
+
+      # A skip here would be a silent pass: the point of this job is that the
+      # data was present and the claim held.
+      - name: The tests actually ran
+        run: |
+          pytest tests/test_real_tum.py -q --collect-only >/dev/null
+          if pytest tests/test_real_tum.py -q 2>&1 | grep -q "skipped"; then
+            echo "::error::real-data tests skipped — the sequence was not found"
+            exit 1
+          fi
