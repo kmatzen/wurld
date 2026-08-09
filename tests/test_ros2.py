@@ -426,3 +426,60 @@ def test_export_memory_does_not_track_sequence_length(tmp_path):
         f"peak grew {long/short:.1f}x for {length_ratio:.0f}x the frames "
         f"({short/1e6:.1f} -> {long/1e6:.1f} MB) — the exporter looks like it is "
         "holding the sequence")
+
+
+# ------------------------------------------------------------------------ hdr
+
+@pytest.fixture(scope="module")
+def hdr_file(tmp_path_factory):
+    """A 10-bit PQ display track: seq.rgb comes back uint16, not uint8."""
+    W2, H2, N2 = 64, 48, 6
+    out = tmp_path_factory.mktemp("ros2hdr") / "hdr.wl.webm"
+    codes = np.stack([np.full((H2, W2, 4), 400 + 40 * i, np.uint16) for i in range(N2)])
+    f = 1.1 * W2
+    wl.write(out,
+             cameras={"0": wl.Camera("PINHOLE", W2, H2, [f, f, W2 / 2, H2 / 2])},
+             frames=[wl.Frame(i=i, t=i / 30, camera="0", q_wxyz=(1.0, 0.0, 0.0, 0.0),
+                              tr=(0.01 * i, 0.0, 1.0)) for i in range(N2)],
+             rgb=codes, hdr={"transfer": "pq", "max_cll": 1000},
+             world={"metric_scale": True}, fps=30)
+    return out
+
+
+def test_hdr_images_are_labelled_rgb16_not_rgb8(hdr_file, tmp_path, caplog):
+    """An rgb8 label on uint16 data is a corrupted double-width image.
+
+    Nothing raises: the message is well-formed as far as CDR is concerned, and a
+    consumer simply reads nonsense. The declared layout has to match the bytes.
+    """
+    import logging
+
+    seq = wl.read(hdr_file)
+    assert seq.rgb.dtype == np.uint16, "the fixture must actually be HDR"
+
+    with caplog.at_level(logging.WARNING):
+        bag = ros2.to_rosbag2(hdr_file, tmp_path / "hdrbag")
+    assert any("HDR display track" in r.getMessage() for r in caplog.records), \
+        "exporting PQ codes as if they were colour said nothing"
+
+    msgs = read_all(bag)
+    topic = next(t for t in msgs if t.endswith("/image_raw") and "depth" not in t)
+    _, _, m = msgs[topic][0]
+    assert m.encoding == "rgb16"
+    assert m.step == m.width * 3 * 2
+    assert len(m.data) == m.width * m.height * 3 * 2
+    assert m.step * m.height == len(m.data), "declared layout does not match the bytes"
+
+
+def test_importing_rgb16_is_refused_rather_than_misread(hdr_file, tmp_path):
+    """A bag cannot record the transfer function, so the round trip is not one."""
+    bag = ros2.to_rosbag2(hdr_file, tmp_path / "hdrbag2")
+    with pytest.raises(ValueError, match="transfer function"):
+        ros2.from_rosbag2(bag, tmp_path / "back.wl.webm")
+
+
+def test_rgb_encoding_rejects_types_it_cannot_describe():
+    assert ros2._rgb_encoding(np.zeros((2, 2, 3), np.uint8)) == "rgb8"
+    assert ros2._rgb_encoding(np.zeros((2, 2, 3), np.uint16)) == "rgb16"
+    with pytest.raises(ValueError, match="no ROS encoding"):
+        ros2._rgb_encoding(np.zeros((2, 2, 3), np.float32))

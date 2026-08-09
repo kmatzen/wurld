@@ -62,6 +62,12 @@ pull-based and never had the defect.
   rig, so a stereo pair keeps its calibrated baseline (measured on real EuRoC:
   11.01 cm, constant to four decimals). Found by exporting a real stereo
   sequence and noticing only one `image_raw` topic came out.
+- **An HDR file exported to ROS was labelled `rgb8` while carrying uint16.**
+  The declared layout was half the actual byte count, so a consumer read a
+  corrupted double-width image and nothing raised. HDR images now go out as
+  `rgb16`, with a warning that the values are display-referred PQ codes rather
+  than linear colour — `sensor_msgs/Image` has no field to say so. Importing
+  `rgb16` is refused with that reason instead of "no images found".
 - **Collections streamed only the primary eye** of a stereo member, the same
   defect as the ROS exporter's. `iter_frames(fields=("rgb",))` now also yields
   `rgbs`; `rgb` stays the primary so single-camera consumers are unaffected.

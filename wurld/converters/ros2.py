@@ -40,6 +40,7 @@ data between ecosystems, not as an archival round trip.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -133,6 +134,21 @@ def _camera_info(ts, cam: container.Camera, seconds: float, frame_id: str):
     )
 
 
+def _rgb_encoding(array: np.ndarray) -> str:
+    """`rgb8` or `rgb16`, by dtype.
+
+    An HDR display track decodes to uint16 (10-bit PQ codes in 0..1023), and
+    labelling that `rgb8` produces a message whose declared layout is half its
+    actual size — a consumer reads a corrupted double-width image rather than
+    getting an error.
+    """
+    if array.dtype == np.uint8:
+        return "rgb8"
+    if array.dtype == np.uint16:
+        return "rgb16"
+    raise ValueError(f"no ROS encoding for {array.dtype} images")
+
+
 def _image(ts, seconds: float, frame_id: str, array: np.ndarray, encoding: str):
     h, w = array.shape[:2]
     data = np.ascontiguousarray(array)
@@ -170,6 +186,16 @@ def to_rosbag2(
     # camera looks like a successful conversion until somebody wants the other
     # eye. Streams are camera ids (SPEC §4.4), so each gets its own topic and
     # its own optical frame.
+    if images and seq.hdr:
+        # sensor_msgs/Image has nowhere to say "these are PQ codes", so the
+        # values go out well-formed but a consumer will read them as ordinary
+        # linear-ish RGB unless told otherwise.
+        logging.getLogger(__name__).warning(
+            "%s carries an HDR display track (%s); images are exported as rgb16 "
+            "holding %d-bit display-referred codes, not linear colour — ROS has "
+            "no field to signal the transfer function",
+            src, seq.hdr.get("transfer", "?"), seq.hdr.get("bits", 10))
+
     stream_ids = seq.rgb_streams if images else []
     if stream_ids == ["rgb"]:
         # The conventional single-stream name is not a camera id; attribute it
@@ -224,8 +250,9 @@ def to_rosbag2(
                 for cam_id, plane in planes.items():
                     if plane is None:
                         continue
-                    msg = _image(ts, f.t, optical_frame(cam_id),
-                                 np.ascontiguousarray(plane[..., :3]), "rgb8")
+                    pixels = np.ascontiguousarray(plane[..., :3])
+                    msg = _image(ts, f.t, optical_frame(cam_id), pixels,
+                                 _rgb_encoding(pixels))
                     bag.write(conn(f"/camera/{cam_id}/image_raw",
                                    "sensor_msgs/msg/Image"),
                               ns, ts.serialize_cdr(msg, "sensor_msgs/msg/Image"))
@@ -361,6 +388,13 @@ def from_rosbag2(
                 if msg.encoding == "32FC1":
                     arr = msg.data.view(np.float32).reshape(msg.height, msg.width)
                     depths.setdefault(cam, []).append((t, arr))
+                elif msg.encoding in ("rgb16", "bgr16"):
+                    # Well-formed but not round-trippable: writing these back
+                    # needs the HDR signalling the bag cannot carry.
+                    raise ValueError(
+                        f"{topic}: {msg.encoding} images hold display-referred "
+                        "codes whose transfer function a rosbag does not record; "
+                        "import them with the original wurld file instead")
                 elif msg.encoding in ("rgb8", "bgr8"):
                     arr = msg.data.reshape(msg.height, msg.width, 3)
                     if msg.encoding == "bgr8":
