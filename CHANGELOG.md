@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 — 2026-08-08
+
+Three reader implementations that provably agree, a C++ writer, datasets built
+from many files, and a ROS 2 bridge — plus HDR, stereo and scene-referred
+signals in the format itself.
+
+The document `version` field moves from `0.4` to **`1.2`**, matching the SPEC
+revision it has always been meant to track (SPEC §10). Nothing reads it as a
+gate, and §10's forward-compatibility rules already cover it — early readers see
+later files as valid — so this is a self-description fix, not a break. Files
+written by wurld 1.1.1 and by the WurldCam build currently in review still say
+`0.4` and remain readable.
 
 ### Added
 
@@ -85,10 +96,11 @@
   rather than showing an empty pane.
 - **`examples/06_stereo_rig.py`** — both eyes, shared depth, rig-derived pose.
 
-Whether this beats EXR depends on temporal coherence: measured against EXR/ZIP,
-13.5x smaller for a static denoised render, 1.5x when the camera moves, and
-0.8x — *larger* — for raw path-traced output with per-frame Monte Carlo noise.
-Denoise before archiving.
+On lossless video versus EXR, since `float16_bits` invites the comparison:
+whether it wins depends on temporal coherence, not on the codec. Measured
+against EXR/ZIP — 13.5x smaller for a static denoised render, 1.5x when the
+camera moves, and 0.8x (*larger*) for raw path-traced output with per-frame
+Monte Carlo noise. Denoise before archiving.
 
 ### Changed
 
@@ -111,6 +123,19 @@ Denoise before archiving.
   epoch in float64 seconds still quantises to ~238 ns — inherent to the
   representation, far below sensor accuracy — so cam0/cam1 pairing compares the
   integer nanoseconds instead.
+- **Document `version` is now `1.2`** (was `0.4`), tracking the SPEC revision as
+  §10 always specified. Additive-only; no reader gates on it.
+
+### Verified
+
+- **HDR10 playback measured** on macOS: Chrome and IINA both honour the PQ
+  transfer function, established by an A/B of two files with byte-identical
+  decoded pixels differing only in colour tag. Appearance on a true HDR panel
+  remains unverified — the measurement ran on a 500-nit LCD.
+- **Three readers agree** on the conformance corpus, and the C++ reader is
+  additionally diffed field-by-field against Python on the example files.
+- **Sharding is disjoint and complete** across ranks x DataLoader workers, with
+  real multi-worker DataLoaders rather than simulated ones.
 
 
 ## 1.1.1 — 2026-08-06

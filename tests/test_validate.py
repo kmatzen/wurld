@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 import wurld as wl
-from wurld import ebml, validate as v
+from wurld import container, ebml, validate as v
 
 
 def _findings(doc_mutation=None, tag_mutation=None, base=None, tmp_path=None):
@@ -288,3 +288,27 @@ def test_hdr_without_any_rgb_is_refused(tmp_path):
                  signals={"depth": np.full((n, H, W), 3000, np.uint16)},
                  specs={"depth": {"inverse_depth": True, "near": 0.3, "far": 9.0}},
                  hdr={"transfer": "pq"}, fps=30)
+
+
+def test_new_files_declare_the_current_format_version(good):
+    doc = json.loads(ebml.read_all_tags(good.read_bytes())["WURLD"])
+    assert doc["version"] == container.FORMAT_VERSION == "1.2"
+
+
+def test_older_format_versions_still_read_and_validate(good, tmp_path):
+    """0.4 files predate the version bump and must keep working.
+
+    SPEC §10 makes `version` additive and ungated, so a reader must not start
+    rejecting the files every earlier release produced — including the WurldCam
+    build that was in App Store review when the bump landed.
+    """
+    data = good.read_bytes()
+    tags = dict(ebml.read_all_tags(data))
+    doc = json.loads(tags["WURLD"])
+    doc["version"] = "0.4"
+    tags["WURLD"] = json.dumps(doc, separators=(",", ":"))
+    aged = tmp_path / "aged.wl.webm"
+    aged.write_bytes(ebml.insert_header_tags(data, tags))
+
+    assert v.validate(aged) == []
+    assert len(container.read(aged).frames) == len(container.read(good).frames)

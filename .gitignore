@@ -29,3 +29,6 @@ ios/.native-build/
 # the pinned chromapakz clone build-native.sh makes
 ios/.native-build/
 cpp/build/
+# `python -m build` leftovers
+/build/
+dist/

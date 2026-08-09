@@ -17,7 +17,9 @@ import numpy as np
 
 from . import conventions, ebml
 
-FORMAT_VERSION = "0.4"
+# The document `version` field (SPEC §10), not the package version.
+# Tracks the SPEC revision: minor bumps are additive-only.
+FORMAT_VERSION = "1.2"
 
 # Binary frame table (SPEC §7): u32 i, u32 camera idx, f64 t, 4×f32 q, 3×f32 tr, u8 flags
 _FRAME_RECORD = struct.Struct("<IId4f3fB")

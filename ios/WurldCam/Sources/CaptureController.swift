@@ -268,7 +268,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             let K = intrinsics ?? matrix_identity_float3x3
             let sx = Double(dw) / Double(rgbSize.width), sy = Double(dh) / Double(rgbSize.height)
             let doc: [String: Any] = [
-                "format": "wurld", "version": "0.4",
+                "format": "wurld", "version": "1.2",   // SPEC §10; see wurld.container.FORMAT_VERSION
                 "conventions": ["camera_axes": "RDF", "pose_direction": "camera_to_world",
                                 "quaternion_order": "wxyz", "units": "meters",
                                 "timestamp_units": "seconds"],

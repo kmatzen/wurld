@@ -264,7 +264,8 @@ inline std::string checked_json(const std::string& blob, const std::string& what
 /// inspect what the writer will emit without writing a file.
 inline std::string build_document(const WriteDoc& doc, bool binary_frames,
                                   const std::vector<std::string>& camera_keys) {
-    std::string out = "{\"format\":\"wurld\",\"version\":\"0.4\"";
+    // Keep in step with wurld.container.FORMAT_VERSION (SPEC §10).
+    std::string out = "{\"format\":\"wurld\",\"version\":\"1.2\"";
     out += ",\"conventions\":{\"camera_axes\":\"RDF\","
            "\"pose_direction\":\"camera_to_world\","
            "\"quaternion_order\":\"wxyz\",\"units\":\"meters\","

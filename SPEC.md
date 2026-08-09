@@ -1,4 +1,4 @@
-# wurld — posed sensor video, v1.1
+# wurld — posed sensor video, v1.2
 
 > **wurld** — the World's Unbroken Record of Localization & Depth.
 
