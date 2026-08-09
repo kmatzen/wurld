@@ -18,6 +18,8 @@ T_WB with T_BS the recovered poses would be wrong by that fixed transform. A tes
 that merely checked "poses exist" would pass with the bug in place.
 """
 
+import os
+
 import numpy as np
 import pytest
 
@@ -304,3 +306,39 @@ def test_interpolation_beats_nearest_neighbour(converted):
     assert max(interp_err) < 1e-6, max(interp_err)
     assert max(nearest_err) > 1e-4, max(nearest_err)
     assert max(nearest_err) > 100 * max(interp_err)
+
+
+def test_max_frames_converts_a_prefix(tmp_path):
+    """The escape hatch for sequences too large to hold at once."""
+    root = tmp_path / "prefix"
+    mav0 = _write_fixture(root)
+    out = root / "prefix.wl.webm"
+    euroc.from_euroc(mav0, out, max_frames=4)
+    seq = wl.read(out)
+    assert len(seq.frames) == 4
+    assert v.validate(out) == []
+
+
+def test_an_impossible_conversion_is_refused_with_a_number(tmp_path, monkeypatch):
+    """An OOM kill twenty minutes in is the worst way to learn this.
+
+    Real EuRoC V1_01_easy is 2912 stereo frames at 752x480 = 8.4 GB of RGBA held
+    at once, because the importer materialises the sequence before encoding.
+    """
+    root = tmp_path / "huge"
+    mav0 = _write_fixture(root)
+    # The fixture is 8 stereo frames at 752x480 (~23 MB of RGBA), so pretend the
+    # machine has 16 MB and the same check fires on the same arithmetic.
+    real = os.sysconf
+
+    def fake(name):
+        if name == "SC_PHYS_PAGES":
+            return 16 * 1024 * 1024 // real("SC_PAGE_SIZE")
+        return real(name)
+
+    monkeypatch.setattr(os, "sysconf", fake)
+    with pytest.raises(MemoryError) as exc:
+        euroc.from_euroc(mav0, root / "nope.wl.webm")
+    message = str(exc.value)
+    assert "GB of RGBA" in message
+    assert "max_frames" in message and "stereo=False" in message

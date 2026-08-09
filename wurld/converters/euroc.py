@@ -128,6 +128,35 @@ def _read_csv(path: Path) -> list[list[str]]:
     return rows
 
 
+def _check_memory(n_frames: int, cam: container.Camera, stereo: bool, base: Path) -> None:
+    """Refuse to start a conversion that cannot finish, and say what to do.
+
+    Every frame is held as RGBA until the whole sequence is encoded, so the peak
+    is the sequence, not a window. A real EuRoC run is 2912 stereo frames at
+    752x480 = **8.4 GB**, which on an ordinary laptop is an OOM kill twenty
+    minutes in with nothing to show. Estimating first turns that into a sentence.
+
+    Streaming the conversion would remove the ceiling; until then `max_frames`
+    converts a prefix, and `stereo=False` halves it.
+    """
+    per_frame = cam.width * cam.height * 4 * (2 if stereo else 1)
+    need = n_frames * per_frame
+    try:
+        import os
+
+        budget = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (ValueError, OSError, AttributeError):     # not POSIX, or not reported
+        return
+    if need <= 0.5 * budget:
+        return
+    raise MemoryError(
+        f"{base}: converting {n_frames} frames at {cam.width}x{cam.height}"
+        f"{' in stereo' if stereo else ''} needs about {need / 1e9:.1f} GB of RGBA "
+        f"held at once, against {budget / 1e9:.1f} GB of RAM. The importer "
+        "materialises the whole sequence before encoding. Convert a prefix with "
+        "max_frames=..., or pass stereo=False to halve it.")
+
+
 def _mav_dir(path: Path) -> Path:
     for base in (path, path / "mav0"):
         if (base / "cam0" / "sensor.yaml").exists():
@@ -141,6 +170,7 @@ def from_euroc(
     max_dt: float = 0.02,
     rgb_kbps: int = 4000,
     stereo: bool = True,
+    max_frames: int | None = None,
 ) -> Path:
     base = _mav_dir(Path(seq_dir))
 
@@ -168,8 +198,13 @@ def from_euroc(
     if want_stereo:
         cam1_by_ns = {int(r[0]): r[1] for r in _read_csv(base / "cam1" / "data.csv")}
 
+    rows = _read_csv(base / "cam0" / "data.csv")
+    if max_frames is not None:
+        rows = rows[:max_frames]
+    _check_memory(len(rows), cameras["0"], want_stereo, base)
+
     frames, rgb, rgb1, skipped = [], [], [], 0
-    for row in _read_csv(base / "cam0" / "data.csv"):
+    for row in rows:
         ns = int(row[0])
         if want_stereo and ns not in cam1_by_ns:
             skipped += 1          # unpaired frame; a stereo stream needs both eyes

@@ -4,6 +4,12 @@
 
 ### Added
 
+- **`from_euroc(..., max_frames=N)`**, and an upfront memory estimate. A real
+  EuRoC sequence is 2912 stereo frames at 752x480 = 8.4 GB of RGBA held at once,
+  because the importer materialises the sequence before encoding; on an 8 GB
+  machine that was an OOM kill twenty minutes in. It now refuses immediately
+  with the arithmetic and a way forward. Streaming the conversion would remove
+  the ceiling and is not done.
 - **`tests/test_real_tum.py`** — the TUM claim quoted in three documents was a
   one-off measurement that nothing re-checked. It now runs against the real
   `freiburg1_desk` download: 572/573 poses associated within 10 ms at
@@ -11,6 +17,14 @@
   within 2e-3 relative of the source 16-bit PNGs, and TUM's `0` (no return)
   still NaN. `scripts/fetch_tum.sh` fetches the sequence (CC BY 4.0, not
   redistributed); the tests skip without it, and a weekly CI job runs them.
+
+### Verified
+
+- **The EuRoC importer, against the real V1_01_easy download** — not just the
+  fixture. Poses recomputed independently from the raw ground-truth csv agree to
+  3.2e-13, the stereo baseline comes out at 11.01 cm, and the 21 frames before
+  ground truth starts stay unposed. Real EuRoC csvs are CRLF, which the importer
+  strips and an LF-only fixture never exercised.
 
 ## 1.2.1 — 2026-08-09
 

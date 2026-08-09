@@ -203,7 +203,20 @@ planes at all — a wurld file is not obliged to carry one.
 
 Tested against a fixture in the ASL layout with the genuine V1_01 calibration
 (`tests/test_euroc.py`), including a check that would fail if the T_BS
-composition were dropped. It has not been run against the real download.
+composition were dropped — **and now against the real V1_01_easy download**.
+Recomputing the poses independently from the raw `state_groundtruth_estimate0`
+csv agrees with the converted file to **3.2e-13**, the stereo baseline comes out
+of the real calibration at **11.01 cm**, and the first 21 frames land before
+ground truth starts and stay `pose_valid: false` — the gap this importer was
+written for, confirmed to be real rather than imagined.
+
+Two things only the real data showed. EuRoC's csvs are **CRLF**, which the
+importer strips and an LF-only fixture never exercised. And a full sequence
+**does not fit in memory**: 2912 stereo frames at 752x480 is 8.4 GB of RGBA held
+at once, because the importer materialises the sequence before encoding. That
+now fails immediately with the arithmetic and a suggestion (`max_frames=`,
+`stereo=False`) rather than being killed twenty minutes in. Removing the ceiling
+means streaming the conversion, which is not done.
 
 ### ▶ 7. A corpus as a training set — `examples/08_collection_training.py`
 
