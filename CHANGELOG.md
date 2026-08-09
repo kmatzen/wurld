@@ -4,12 +4,21 @@
 
 ### Added
 
-- **`from_euroc(..., max_frames=N)`**, and an upfront memory estimate. A real
-  EuRoC sequence is 2912 stereo frames at 752x480 = 8.4 GB of RGBA held at once,
-  because the importer materialises the sequence before encoding; on an 8 GB
-  machine that was an OOM kill twenty minutes in. It now refuses immediately
-  with the arithmetic and a way forward. Streaming the conversion would remove
-  the ceiling and is not done.
+- **`wurld.stream.write_streaming`** — writes a wurld file from an *iterator* of
+  frames, holding one frame rather than the sequence. `container.write` takes
+  whole arrays, which is fine for a 573-frame TUM capture and impossible for a
+  real EuRoC one.
+- **`StreamWriter` supports multi-camera display streams** (`rgb_streams=`,
+  `add_frame(rgbs=...)`), the streaming counterpart of `write(rgb={id: array})`.
+  Stream ids are validated against the declared cameras at construction, before
+  any encoding.
+- **The EuRoC importer streams**, and `from_euroc(..., max_frames=N)` converts a
+  prefix. The full real V1_01_easy sequence now converts in 284 s at a **68 MB**
+  peak, against the 8.4 GB it would have needed materialised — it previously
+  could not be converted at all on an 8 GB machine. Its poses now live in the
+  binary frame table, so they are float32 (~1e-7 on metre-scale translations)
+  where the batch path used float64 JSON for short sequences; timestamps stay
+  float64.
 - **`tests/test_real_tum.py`** — the TUM claim quoted in three documents was a
   one-off measurement that nothing re-checked. It now runs against the real
   `freiburg1_desk` download: 572/573 poses associated within 10 ms at

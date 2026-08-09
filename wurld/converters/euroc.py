@@ -47,7 +47,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .. import container, conventions
+from .. import container, conventions, stream
 
 
 def _yaml_list(text: str, key: str) -> list[float] | None:
@@ -128,35 +128,6 @@ def _read_csv(path: Path) -> list[list[str]]:
     return rows
 
 
-def _check_memory(n_frames: int, cam: container.Camera, stereo: bool, base: Path) -> None:
-    """Refuse to start a conversion that cannot finish, and say what to do.
-
-    Every frame is held as RGBA until the whole sequence is encoded, so the peak
-    is the sequence, not a window. A real EuRoC run is 2912 stereo frames at
-    752x480 = **8.4 GB**, which on an ordinary laptop is an OOM kill twenty
-    minutes in with nothing to show. Estimating first turns that into a sentence.
-
-    Streaming the conversion would remove the ceiling; until then `max_frames`
-    converts a prefix, and `stereo=False` halves it.
-    """
-    per_frame = cam.width * cam.height * 4 * (2 if stereo else 1)
-    need = n_frames * per_frame
-    try:
-        import os
-
-        budget = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-    except (ValueError, OSError, AttributeError):     # not POSIX, or not reported
-        return
-    if need <= 0.5 * budget:
-        return
-    raise MemoryError(
-        f"{base}: converting {n_frames} frames at {cam.width}x{cam.height}"
-        f"{' in stereo' if stereo else ''} needs about {need / 1e9:.1f} GB of RGBA "
-        f"held at once, against {budget / 1e9:.1f} GB of RAM. The importer "
-        "materialises the whole sequence before encoding. Convert a prefix with "
-        "max_frames=..., or pass stereo=False to halve it.")
-
-
 def _mav_dir(path: Path) -> Path:
     for base in (path, path / "mav0"):
         if (base / "cam0" / "sensor.yaml").exists():
@@ -201,20 +172,17 @@ def from_euroc(
     rows = _read_csv(base / "cam0" / "data.csv")
     if max_frames is not None:
         rows = rows[:max_frames]
-    _check_memory(len(rows), cameras["0"], want_stereo, base)
 
-    frames, rgb, rgb1, skipped = [], [], [], 0
+    # Poses first, from the csvs alone. They are small, and knowing the frame
+    # list up front means the images can be read one at a time below instead of
+    # being accumulated to discover how many there are.
+    frames, plan, skipped = [], [], 0
     for row in rows:
         ns = int(row[0])
         if want_stereo and ns not in cam1_by_ns:
             skipped += 1          # unpaired frame; a stereo stream needs both eyes
             continue
         t = ns * 1e-9
-        rgb.append(np.asarray(Image.open(base / "cam0" / "data" / row[1]).convert("RGBA")))
-        if want_stereo:
-            rgb1.append(np.asarray(
-                Image.open(base / "cam1" / "data" / cam1_by_ns[ns]).convert("RGBA")))
-
         i = len(frames)
         t_wb = _interpolate_body_pose(gt_t, gt_p, gt_q, t, max_dt)
         if t_wb is None:
@@ -223,6 +191,8 @@ def from_euroc(
             c2w = t_wb @ t_bs0  # EuRoC cameras are already RDF: no axis flip
             q, tr = conventions.matrix_to_pose(c2w)
             frames.append(container.Frame(i=i, t=t, camera="0", q_wxyz=tuple(q), tr=tuple(tr)))
+        plan.append((base / "cam0" / "data" / row[1],
+                     base / "cam1" / "data" / cam1_by_ns[ns] if want_stereo else None))
 
     imu = []
     if (base / "imu0" / "data.csv").exists():
@@ -248,25 +218,42 @@ def from_euroc(
     if len(ts) > 1 and ts[-1] > ts[0]:
         fps = round((len(ts) - 1) / (ts[-1] - ts[0]), 3)
 
-    return container.write(
+    world = {
+        "metric_scale": True,
+        "gravity_in_world": [0.0, 0.0, -1.0],  # EuRoC world (Leica/Vicon) is z-up
+        "description": (
+            f"EuRoC MAV import from {base}; "
+            + ("both eyes carried as display streams \"0\"/\"1\""
+               if want_stereo else
+               "video carries cam0 only (stereo=False)")
+            + "; poses stored for camera \"0\", camera \"1\" derives from the body rig"
+        ),
+    }
+    rigs = {"body": {"cameras": rig_cams,
+                     "description": "EuRoC T_BS calibration: camera-to-body transforms"}}
+
+    # Stream the images: one frame in memory at a time rather than the whole
+    # sequence. A real V1_01_easy run is 2912 stereo frames at 752x480, which
+    # materialised is 8.4 GB — more than the machine this was written on has.
+    def load(path):
+        with Image.open(path) as im:
+            return np.asarray(im.convert("RGBA"))
+
+    def source():
+        for frame, (p0, p1) in zip(frames, plan):
+            if want_stereo:
+                yield frame, None, {"0": load(p0), "1": load(p1)}, {}
+            else:
+                yield frame, load(p0), None, {}
+
+    return stream.write_streaming(
         out_path,
         cameras=cameras,
-        frames=frames,
-        rgb=({"0": np.stack(rgb), "1": np.stack(rgb1)} if want_stereo else np.stack(rgb)),
-        rigs={"body": {"cameras": rig_cams,
-                       "description": "EuRoC T_BS calibration: camera-to-body transforms"}},
+        frames=source(),
+        rgb_streams=["0", "1"] if want_stereo else None,
+        rigs=rigs,
         imu=imu,
         fps=fps,
         rgb_kbps=rgb_kbps,
-        world={
-            "metric_scale": True,
-            "gravity_in_world": [0.0, 0.0, -1.0],  # EuRoC world (Leica/Vicon) is z-up
-            "description": (
-                f"EuRoC MAV import from {base}; "
-                + ("both eyes carried as display streams \"0\"/\"1\""
-                   if want_stereo else
-                   "video carries cam0 only (stereo=False)")
-                + "; poses stored for camera \"0\", camera \"1\" derives from the body rig"
-            ),
-        },
+        world=world,
     )

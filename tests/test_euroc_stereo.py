@@ -100,7 +100,7 @@ def _quat(m):
     return conventions.matrix_to_pose(m)[0]
 
 
-def _write_fixture(root):
+def _write_fixture(root, frames=None):
     from PIL import Image
 
     mav0 = root / "mav0"
@@ -111,7 +111,8 @@ def _write_fixture(root):
         (d / "sensor.yaml").write_text(_sensor_yaml(t_bs, intr, dist, f"VI-Sensor {cid}"))
 
     rng = np.random.default_rng(0)
-    stamps = [T0_NS + int(round(i / IMG_HZ * 1e9)) for i in range(N_IMG)]
+    n_img = N_IMG if frames is None else frames
+    stamps = [T0_NS + int(round(i / IMG_HZ * 1e9)) for i in range(n_img)]
     lines0, lines1 = ["#timestamp [ns],filename"], ["#timestamp [ns],filename"]
     for i, ts in enumerate(stamps):
         # Structured, not noise: VP9 on pure noise is slow and pointless here.
@@ -153,7 +154,7 @@ def _write_fixture(root):
         "rate_hz: 200\n")
     irows = ["#timestamp [ns],w_RS_S_x [rad s^-1],w_RS_S_y,w_RS_S_z,"
              "a_RS_S_x [m s^-2],a_RS_S_y,a_RS_S_z"]
-    n_imu = int(round((N_IMG - 1) / IMG_HZ * IMU_HZ)) + 1
+    n_imu = int(round((n_img - 1) / IMG_HZ * IMU_HZ)) + 1
     for k in range(n_imu):
         t = k / IMU_HZ
         irows.append(",".join([str(T0_NS + int(round(t * 1e9))), "0.0", "0.0", "0.3",
@@ -319,26 +320,29 @@ def test_max_frames_converts_a_prefix(tmp_path):
     assert v.validate(out) == []
 
 
-def test_an_impossible_conversion_is_refused_with_a_number(tmp_path, monkeypatch):
-    """An OOM kill twenty minutes in is the worst way to learn this.
+def test_a_full_length_sequence_does_not_need_to_fit_in_memory(tmp_path):
+    """The ceiling this importer used to have, asserted rather than described.
 
-    Real EuRoC V1_01_easy is 2912 stereo frames at 752x480 = 8.4 GB of RGBA held
-    at once, because the importer materialises the sequence before encoding.
+    A real EuRoC run is 2912 stereo frames at 752x480 — 8.4 GB of RGBA if the
+    sequence is materialised, which is more than the machine this was written on
+    has. Streaming holds one frame, so peak memory tracks the frame size and not
+    the sequence length. The fixture is small; what it checks is the *shape* of
+    the curve, by converting twice at different lengths.
     """
-    root = tmp_path / "huge"
-    mav0 = _write_fixture(root)
-    # The fixture is 8 stereo frames at 752x480 (~23 MB of RGBA), so pretend the
-    # machine has 16 MB and the same check fires on the same arithmetic.
-    real = os.sysconf
+    import tracemalloc
 
-    def fake(name):
-        if name == "SC_PHYS_PAGES":
-            return 16 * 1024 * 1024 // real("SC_PAGE_SIZE")
-        return real(name)
+    def peak_for(n):
+        root = tmp_path / f"len{n}"
+        mav0 = _write_fixture(root, frames=n)
+        tracemalloc.start()
+        euroc.from_euroc(mav0, root / "out.wl.webm")
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        return peak
 
-    monkeypatch.setattr(os, "sysconf", fake)
-    with pytest.raises(MemoryError) as exc:
-        euroc.from_euroc(mav0, root / "nope.wl.webm")
-    message = str(exc.value)
-    assert "GB of RGBA" in message
-    assert "max_frames" in message and "stereo=False" in message
+    short, long = peak_for(4), peak_for(N_IMG)
+    assert N_IMG >= 2 * 4, "the two lengths must differ enough to be informative"
+    # Materialising would make peak scale with frame count; streaming must not.
+    assert long < 1.6 * short, (
+        f"peak grew from {short/1e6:.1f} MB at 4 frames to {long/1e6:.1f} MB at "
+        f"{N_IMG} — memory is tracking sequence length, not frame size")

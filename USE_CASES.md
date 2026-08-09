@@ -211,12 +211,30 @@ ground truth starts and stay `pose_valid: false` — the gap this importer was
 written for, confirmed to be real rather than imagined.
 
 Two things only the real data showed. EuRoC's csvs are **CRLF**, which the
-importer strips and an LF-only fixture never exercised. And a full sequence
-**does not fit in memory**: 2912 stereo frames at 752x480 is 8.4 GB of RGBA held
-at once, because the importer materialises the sequence before encoding. That
-now fails immediately with the arithmetic and a suggestion (`max_frames=`,
-`stereo=False`) rather than being killed twenty minutes in. Removing the ceiling
-means streaming the conversion, which is not done.
+importer strips and an LF-only fixture never exercised. And a full sequence did
+not fit in memory: materialising 2912 stereo frames at 752x480 is 8.4 GB of
+RGBA, more than the machine this was written on has.
+
+That ceiling is gone. The importer streams — poses are planned from the csvs
+first, then images are read one at a time and handed to `StreamWriter`. The
+whole real sequence now converts:
+
+| | |
+|---|---|
+| frames | 2912 stereo, 2872 posed |
+| peak memory | **68 MB** (materialised: 8400 MB) |
+| time | 284 s |
+| output | 167 MB, `validate` clean |
+| poses vs independent recomputation | 1.2e-07 |
+
+The residual 1.2e-07 is float32: the streaming layout stores poses in the binary
+frame table (SPEC §7), where the batch path would have used the float64 JSON
+array for a sequence this short. Sixty nanometres on a metre-scale translation,
+and timestamps keep float64 either way.
+
+`wurld.stream.write_streaming` is the reusable form of this. The other six
+importers still materialise; EuRoC is simply the first input large enough to
+force the issue.
 
 ### ▶ 7. A corpus as a training set — `examples/08_collection_training.py`
 

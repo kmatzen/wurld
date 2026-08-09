@@ -26,6 +26,7 @@ Events yielded by ``feed()``:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 
@@ -71,6 +72,7 @@ class StreamWriter:
         has_rgb: bool = True,
         rgb_kbps: int = 2000,
         pose_track: bool = False,
+        rgb_streams: list[str] | None = None,
     ):
         import chromapakz as cz
 
@@ -80,6 +82,19 @@ class StreamWriter:
                 "(cz.create_encoder; chromapakz PR #43)"
             )
         cam0 = next(iter(cameras.values()))
+        # Multi-camera display streams (SPEC §4.4), the streaming counterpart of
+        # write(rgb={id: array}). Stream ids are camera ids, checked here rather
+        # than at the first add_frame so a mistake surfaces before any encoding.
+        self._rgb_streams = list(rgb_streams) if rgb_streams else []
+        if self._rgb_streams:
+            unknown = [s for s in self._rgb_streams if s not in cameras]
+            if unknown:
+                raise ValueError(
+                    f"rgb_streams {unknown} are not declared cameras "
+                    f"(SPEC 4.4: stream ids are camera ids); cameras are {sorted(cameras)}")
+            if not has_rgb:
+                raise ValueError("rgb_streams given but has_rgb=False")
+            cam0 = cameras[self._rgb_streams[0]]
         self._on_chunk = on_chunk
         self._camera_keys = sorted(cameras)
         self._signal_meta = list(signal_meta or [])
@@ -126,9 +141,15 @@ class StreamWriter:
                 "pose_track needs chromapakz >= 0.5.0 (cz.create_encoder(text_track=...))"
             )
         kwargs = {"text_track": "wurld-poses"} if self._pose_track else {}
+        if self._rgb_streams:
+            # A list of stream ids; order fixes track numbering, first is primary.
+            kwargs["rgbs"] = list(self._rgb_streams)
+            kwargs["has_rgb"] = False       # rgbs and has_rgb are exclusive
+        else:
+            kwargs["has_rgb"] = has_rgb
         self._enc = cz.create_encoder(
             cam0.width, cam0.height, signals=cz_signals, fps=max(1, round(fps)),
-            has_rgb=has_rgb, rgb_kbps=rgb_kbps, on_chunk=self._weave, cues=False,
+            rgb_kbps=rgb_kbps, on_chunk=self._weave, cues=False,
             **kwargs,
         )
         self._t0 = None
@@ -161,9 +182,23 @@ class StreamWriter:
         self._flush_tags()
         self._emit(chunk)
 
-    def add_frame(self, pose: Frame | None, *, rgb=None, signals=None) -> None:
+    def add_frame(self, pose: Frame | None, *, rgb=None, signals=None, rgbs=None) -> None:
+        """One frame. ``rgbs`` is ``{camera_id: plane}`` for a multi-stream writer.
+
+        Every declared stream must appear on every frame — the encoder plans its
+        tracks from the first frame, and a stream that vanishes later would
+        desynchronise the timeline rather than simply be absent.
+        """
         if self._finished:
             raise RuntimeError("StreamWriter is finished")
+        if self._rgb_streams:
+            if rgb is not None:
+                raise ValueError("this writer has rgb_streams; pass rgbs={id: plane}")
+            missing = [s for s in self._rgb_streams if s not in (rgbs or {})]
+            if missing:
+                raise ValueError(f"frame is missing rgb streams {missing}")
+        elif rgbs is not None:
+            raise ValueError("rgbs given but the writer declared no rgb_streams")
         if pose is not None:
             if pose.pose_valid:
                 q = np.asarray(pose.q_wxyz, dtype=np.float64)
@@ -171,7 +206,10 @@ class StreamWriter:
                     raise ValueError(f"frame {pose.i}: quaternion not unit")
             self._pending.append(pose)
             self._all.append(pose)
-        self._enc.add_frame(rgb=rgb, signals=signals or {})
+        if self._rgb_streams:
+            self._enc.add_frame(rgbs=rgbs, signals=signals or {})
+        else:
+            self._enc.add_frame(rgb=rgb, signals=signals or {})
         if self._pose_track and pose is not None and pose.pose_valid:
             # Cue times are rebased to the media timeline: sensor clocks are absolute
             # (ARKit reports device uptime) and a cue at t=71877s would sit far past
@@ -327,3 +365,68 @@ class StreamReader:
         if self._pos > 1 << 20:
             del self._buf[: self._pos]
             self._pos = 0
+
+
+def write_streaming(
+    path,
+    *,
+    cameras,
+    frames,
+    rgb_streams=None,
+    signal_meta=None,
+    world=None,
+    rigs=None,
+    imu=None,
+    fps=30,
+    rgb_kbps=2000,
+):
+    """Write a wurld file from an *iterator* of frames, one frame in memory at a time.
+
+    `container.write` takes whole arrays, so a converter must materialise the
+    sequence before encoding it. That is fine for a 573-frame TUM capture and
+    impossible for a real EuRoC one: 2912 stereo frames at 752x480 is 8.4 GB of
+    RGBA held at once. This is the same file, produced without ever holding more
+    than one frame.
+
+    ``frames`` yields ``(Frame, rgb, rgbs, signals)``:
+
+    * ``rgb`` — an (H, W, 4) array for a single-stream file, else None;
+    * ``rgbs`` — ``{camera_id: (H, W, 4)}`` when ``rgb_streams`` is given;
+    * ``signals`` — ``{signal_id: {"u16": codes} | {"float": values}}``, matching
+      the chromapakz streaming contract.
+
+    The result uses the streaming layout (SPEC §9): poses arrive as
+    ``WURLD_POSES`` chunks ahead of their Clusters and are consolidated into a
+    single table on finish, so a reader sees the same poses either way. It is a
+    normal wurld file — `read` and `validate` do not care which path wrote it.
+
+    `imu` takes `ImuStream` objects, as `write` does; they are emitted whole
+    because an IMU stream is small next to the video it accompanies.
+    """
+    path = Path(path)
+    imu = list(imu or [])
+    descriptors = {s.id: s.to_json() if hasattr(s, "to_json") else {} for s in imu}
+
+    with open(path, "wb") as fh:
+        writer = StreamWriter(
+            fh.write,
+            cameras=cameras,
+            signal_meta=list(signal_meta or []),
+            world=world,
+            rigs=rigs,
+            imu=descriptors or None,
+            fps=fps,
+            has_rgb=True,
+            rgb_kbps=rgb_kbps,
+            rgb_streams=rgb_streams,
+        )
+        n = 0
+        for frame, rgb, rgbs, signals in frames:
+            writer.add_frame(frame, rgb=rgb, rgbs=rgbs, signals=signals or {})
+            n += 1
+        if n == 0:
+            raise ValueError("write_streaming: the frame iterator yielded nothing")
+        for s in imu:
+            writer.add_imu(s.id, s.samples)
+        writer.finish()
+    return path
