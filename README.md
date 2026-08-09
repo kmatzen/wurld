@@ -147,6 +147,34 @@ Photos cannot open them at all**, because AVFoundation has no WebM demuxer. That
 is a deliberate trade — VP9 lossless is what makes bit-exact depth possible —
 and desktop viewing is VLC or IINA.
 
+## C++ reader
+
+`cpp/include/wurld.hpp` is a single-header C++17 reader with **no dependencies**
+— calibration, per-frame poses, timestamps, signal descriptors, rigs and IMU:
+
+```cpp
+#include "wurld.hpp"
+auto doc = wurld::read("scene.wl.webm");
+for (const auto& f : doc.frames)
+    if (f.pose_valid) use(f.c2w());          // row-major 4x4, camera-to-world
+```
+
+It does **not** decode pixels or depth; that needs libvpx and chromapakz, and
+the point of the header is that it drops onto a robot without dragging a codec
+stack along. `doc.cluster_start` reports where the Clusters begin for consumers
+that do want to hand bytes to a decoder. Traversal seeks over payloads and reads
+only Tags, so opening a 10 GB file costs a handful of seeks.
+
+Agreement with the Python reader is the actual requirement, so it is tested that
+way: `tests/test_cpp_reader.py` diffs both readers field-by-field over JSON and
+binary pose tables, rigs, IMU, unposed frames and the example files. A second
+implementation that only agrees with itself is not a second implementation.
+
+```bash
+cmake -S cpp -B cpp/build && cmake --build cpp/build
+./cpp/build/wurld_info scene.wl.webm
+```
+
 ## Collections: a corpus as a dataset
 
 One file is one sequence; training is ten thousand of them. A **collection**
@@ -191,6 +219,7 @@ the separate scene-manifest concern reserved in SPEC §11.
 - `tests/` — round-trip suite (`pytest`): bit-exact depth, pose fidelity, converter
   round trips, COLMAP binary parsing, validation errors
 - `viewer/` — single-file browser viewer
+- `cpp/` — dependency-free single-header C++17 metadata reader + `wurld_info`
 - `wurld/collection.py` — manifests, global indexing, sharded streaming
 - `wurld/integrations/` — nerfstudio DataParser, PyTorch datasets
 - `examples/` — runnable scenario walkthroughs (see USE_CASES.md)

@@ -16,6 +16,13 @@
   intrinsics apply. `Sequence.rgb_streams` / `rgb_for(id)` read them. Poses stay
   single-camera with rig-derived siblings; a lone stream keeps the conventional
   id `rgb` and binds implicitly, so existing files are unaffected.
+- **C++ reader** (`cpp/include/wurld.hpp`) — single-header C++17, zero
+  dependencies, reading calibration, poses, timestamps, signals, rigs and IMU.
+  Deliberately does not decode pixels: that needs libvpx and chromapakz, and the
+  value here is dropping onto a robot without a codec stack. `cluster_start`
+  points at the pixels for consumers that want them. Traversal seeks over
+  payloads, so file size does not drive I/O. Checked against the Python reader
+  field-by-field rather than against its own expectations.
 - **Collections (SPEC §13)** — many wurld files as one dataset. `wurld index`
   builds a manifest; `Collection` gives global frame addressing across members
   and sharded streaming. Indexing reads headers only: a file with 100x the

@@ -24,9 +24,31 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update && sudo apt-get install -y ffmpeg
           else brew install ffmpeg; fi
       - name: Install
-        run: pip install -e ".[dev,mcap,record3d]"
+        run: pip install -e ".[dev,mcap,record3d,euroc]"
       - name: Test
         run: pytest tests -q
+
+  cpp:
+    # The C++ reader is checked against the Python one, so this job needs both.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Build and unit-test the C++ reader
+        run: |
+          cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build cpp/build -j
+          ./cpp/build/wurld_test
+      - name: Cross-implementation parity against the Python reader
+        run: pytest tests/test_cpp_reader.py -q
 
   viewer-node:
     runs-on: ubuntu-latest
