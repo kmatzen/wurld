@@ -362,16 +362,17 @@ WebCodecs codec string `vp09.02.10.10.01.09.16.09` and an `hdr` object.
 SDR files are byte-unchanged; pre-0.8.0 readers fail loudly on a profile-2
 stream rather than mis-decoding it.
 
-Two things to know before reaching for it:
+wurld exposes it: `wl.write(..., hdr={"transfer": "pq", "max_cll": ...})`, and
+`Sequence.hdr` reports the signalling while `Sequence.rgb` returns 10-bit codes
+as `uint16` instead of `uint8`. SPEC §4.5 defines it, and says the thing worth
+saying twice: a display track is display-referred, a `float16_bits` signal is
+scene-referred, and a consumer that needs radiance must not read it off the
+display track. A file may carry both.
 
-- **wurld does not expose it.** `wl.write()` and `StreamWriter` have no `hdr`
-  passthrough, so a wurld file cannot be HDR today without going around them to
-  chromapakz. Wiring it through is small, but it is a deliberate step and the
-  SPEC should say what an HDR display track means beside bit-exact depth.
-- **Our browser viewer cannot draw HDR RGB.** chromapakz's JS decoder skips HDR
-  RGB streams — there is no 10-bit WebCodecs output path yet — so signals and
-  SDR decode but the colour pane would be empty. Plain `<video>` playback in a
-  browser does work, which is the display track's actual job.
+**Our browser viewer cannot draw HDR colour.** chromapakz's JS decoder skips HDR
+RGB streams — no 10-bit WebCodecs output path yet — so the viewer now says so
+rather than showing a silently empty pane; geometry and poses still draw, and
+the file plays in a plain `<video>` element, which is the display track's job.
 
 Still worth repeating why this is a browser-and-VLC benefit only: Apple players
 cannot open the container at any bit depth.
@@ -386,12 +387,18 @@ signal hi/lo tracks now number after all RGB tracks. There is also a `view` hint
 letting a signal name the RGB stream whose camera frame it lives in — recorded
 verbatim, interpreted by nothing.
 
-**wurld has not adopted it.** The pins are on 0.7.0 and everything builds, but
-SPEC v1 still describes a single RGB track, and the camera model, pose-table
-camera indices, viewer and extractors all assume one. Taking it up means a SPEC
-revision — deciding how `cameras` maps onto `rgbs[]`, whether poses stay
-single-camera with rig-derived siblings or become per-stream, and what the
-viewer shows. Worth doing deliberately; the container is no longer the blocker.
+**wurld adopted it in SPEC §4.4.** The binding is that *stream ids are camera
+ids*: a stream named `cam1` carries the pixels `cameras["cam1"]` calibrates,
+which is what lets a reader tell which intrinsics apply to which pixels. Write
+with `rgb={"cam0": ..., "cam1": ...}`, read with `Sequence.rgb_streams` and
+`rgb_for(camera_id)`. A single-stream file keeps the conventional id `rgb` and
+binds implicitly, so nothing older changes.
+
+Poses stay **single-camera with rig-derived siblings**, deliberately: a rigid
+rig's extrinsics belong in `rigs` once, not restated per frame where they can
+drift. Per-camera poses remain expressible through the frame record's camera
+field for non-rigid setups. `wurld validate` checks that every stream names a
+declared camera, and that HDR applies to all streams or none.
 
 ---
 

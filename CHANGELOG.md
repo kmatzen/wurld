@@ -11,6 +11,16 @@
 - **`Sequence.signal_values(id)`** — codes through their value map, the general
   form of `depth_meters`.
 - **`examples/05_hdr_exr_render.py`**, and `wurld validate` accepts the new type.
+- **Multi-camera display streams (SPEC §4.4)** — `wl.write(rgb={camera_id: array})`
+  stores several cameras' pixels in one file, bound by id so a reader knows which
+  intrinsics apply. `Sequence.rgb_streams` / `rgb_for(id)` read them. Poses stay
+  single-camera with rig-derived siblings; a lone stream keeps the conventional
+  id `rgb` and binds implicitly, so existing files are unaffected.
+- **HDR display track (SPEC §4.5)** — `wl.write(..., hdr={"transfer": "pq"})`;
+  `Sequence.hdr` reports the signalling and `Sequence.rgb` returns `uint16`
+  10-bit codes. Display-referred, and explicitly not a substitute for a
+  `float16_bits` signal. The browser viewer says it cannot draw HDR colour
+  rather than showing an empty pane.
 
 Whether this beats EXR depends on temporal coherence: measured against EXR/ZIP,
 13.5x smaller for a static denoised render, 1.5x when the camera moves, and

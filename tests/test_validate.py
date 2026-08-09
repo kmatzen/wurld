@@ -206,3 +206,85 @@ def test_real_shipped_samples_conform():
     if not sample.exists():
         pytest.skip("sample not present")
     assert v.validate(sample) == []
+
+
+# ── display streams and HDR (SPEC §4.4, §4.5) ──
+
+def _stereo(tmp_path, cam_ids=("cam0", "cam1"), hdr=None, n=4):
+    H, W = 32, 40
+    cams = {c: wl.Camera(model="PINHOLE", width=W, height=H,
+                         params=[30.0, 30.0, W / 2, H / 2]) for c in cam_ids}
+    frames = [wl.Frame(i=i, t=i / 30, camera=cam_ids[0], q_wxyz=(1.0, 0, 0, 0),
+                       tr=(0.01 * i, 0, 0.5)) for i in range(n)]
+    rng = np.random.default_rng(0)
+    dt = np.uint16 if hdr else np.uint8
+    hi = 1024 if hdr else 255
+    path = tmp_path / "streams.wl.webm"
+    wl.write(path, cameras=cams, frames=frames,
+             rgb={c: rng.integers(0, hi, (n, H, W, 4), dtype=dt) for c in cam_ids},
+             signals={"depth": np.full((n, H, W), 3000, np.uint16)},
+             specs={"depth": {"inverse_depth": True, "near": 0.3, "far": 9.0}},
+             signal_meta=[wl.SignalMeta("depth", "depth",
+                                        {"type": "inverse_depth", "near": 0.3, "far": 9.0,
+                                         "levels": 65536, "invalid": 0})],
+             hdr=hdr, fps=30)
+    return path
+
+
+def test_stereo_streams_bind_to_cameras_by_id(tmp_path):
+    p = _stereo(tmp_path)
+    assert v.validate(p) == []
+    seq = wl.read(p)
+    assert seq.rgb_streams == ["cam0", "cam1"]
+    # Distinct pixels per camera, not the same buffer handed back twice.
+    assert not np.array_equal(seq.rgb_for("cam0"), seq.rgb_for("cam1"))
+
+
+def test_a_stream_with_no_matching_camera_is_refused_at_write(tmp_path):
+    H, W, n = 32, 40, 3
+    cams = {"cam0": wl.Camera(model="PINHOLE", width=W, height=H,
+                              params=[30.0, 30.0, W / 2, H / 2])}
+    frames = [wl.Frame(i=i, t=i / 30, camera="cam0", q_wxyz=(1.0, 0, 0, 0), tr=(0, 0, 0.5))
+              for i in range(n)]
+    rng = np.random.default_rng(0)
+    with pytest.raises(ValueError, match="no matching camera"):
+        wl.write(tmp_path / "bad.wl.webm", cameras=cams, frames=frames,
+                 rgb={"cam0": rng.integers(0, 255, (n, H, W, 4), np.uint8),
+                      "ghost": rng.integers(0, 255, (n, H, W, 4), np.uint8)}, fps=30)
+
+
+def test_streams_must_agree_on_frame_count(tmp_path):
+    H, W = 32, 40
+    cams = {c: wl.Camera(model="PINHOLE", width=W, height=H,
+                         params=[30.0, 30.0, W / 2, H / 2]) for c in ("cam0", "cam1")}
+    frames = [wl.Frame(i=i, t=i / 30, camera="cam0", q_wxyz=(1.0, 0, 0, 0), tr=(0, 0, 0.5))
+              for i in range(3)]
+    rng = np.random.default_rng(0)
+    with pytest.raises(ValueError, match="disagree on frame count"):
+        wl.write(tmp_path / "bad.wl.webm", cameras=cams, frames=frames,
+                 rgb={"cam0": rng.integers(0, 255, (3, H, W, 4), np.uint8),
+                      "cam1": rng.integers(0, 255, (5, H, W, 4), np.uint8)}, fps=30)
+
+
+def test_hdr_display_track(tmp_path):
+    p = _stereo(tmp_path, cam_ids=("cam0",), hdr={"transfer": "pq", "max_cll": 1000})
+    assert v.validate(p) == []
+    seq = wl.read(p)
+    hdr = seq.hdr
+    assert hdr is not None and hdr["transfer"] == "pq" and hdr["bits"] == 10
+    # HDR display pixels come back as 10-bit codes, not truncated to uint8.
+    assert seq.rgb.dtype == np.uint16
+    assert int(seq.rgb.max()) > 255
+
+
+def test_hdr_without_any_rgb_is_refused(tmp_path):
+    H, W, n = 32, 40, 3
+    cams = {"0": wl.Camera(model="PINHOLE", width=W, height=H,
+                           params=[30.0, 30.0, W / 2, H / 2])}
+    frames = [wl.Frame(i=i, t=i / 30, camera="0", q_wxyz=(1.0, 0, 0, 0), tr=(0, 0, 0.5))
+              for i in range(n)]
+    with pytest.raises(ValueError, match="no RGB stream"):
+        wl.write(tmp_path / "bad.wl.webm", cameras=cams, frames=frames,
+                 signals={"depth": np.full((n, H, W), 3000, np.uint16)},
+                 specs={"depth": {"inverse_depth": True, "near": 0.3, "far": 9.0}},
+                 hdr={"transfer": "pq"}, fps=30)

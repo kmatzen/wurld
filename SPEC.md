@@ -142,6 +142,47 @@ Each entry binds a chromapakz signal id to a semantic role:
 - For `role: depth`, values map to **metric depth along the camera +Z axis** (not ray
   length), in meters.
 
+### 4.4 Display streams and cameras (v1.2)
+
+A file MAY store pixels for several cameras — a stereo rig recording both eyes.
+**Stream ids are camera ids**: a display stream named `cam1` carries the pixels
+`cameras["cam1"]` calibrates. That binding is the whole mechanism; without it a
+reader cannot tell which intrinsics apply to which pixels.
+
+- The first declared stream is the **primary**. It keeps the underlying
+  container's track 1 and the name `rgb`, so readers that predate multi-stream
+  support decode it and ignore the rest.
+- A file with a **single** stream carries the conventional id `rgb` and binds to
+  its sole camera implicitly; the id-is-camera-id rule applies from two streams
+  up, where a reader would otherwise have nothing to match on.
+- Every stream shares the file's width, height and frame grid. Unsynchronised
+  rigs are out of scope (§11: one rig, one clock).
+- A declared camera MAY have no stream of its own: its pose still derives from
+  `rigs` (§8.1), it simply has no recorded pixels. The reverse MUST NOT happen —
+  a stream whose id is not a declared camera is invalid.
+- **Poses stay single-camera by default.** Frames name one camera and the rest
+  derive through `rigs`, because a rigid rig's extrinsics should be stated once
+  rather than restated per frame, where they can drift. Per-camera poses remain
+  expressible via the frame record's camera field for non-rigid setups.
+
+Writers SHOULD calibrate every camera at the shared resolution (§4.1 requires
+equality with the video track).
+
+### 4.5 HDR display track (v1.2)
+
+The lossy display stream MAY be HDR: 10-bit, BT.2020, PQ or HLG, with the
+container carrying the colour signalling that makes a player treat it as HDR
+rather than washed-out SDR. Readers see `uint16` codes (0..1023) instead of
+`uint8`.
+
+This is **display-referred** — absolute nits through a transfer curve — and is a
+different thing from a `float16_bits` signal (§6.1), which is **scene-referred**
+linear radiance. A file MAY carry both: the display stream is what a player
+shows, the signal is the data. Neither substitutes for the other, and a consumer
+that needs radiance MUST NOT read it off the display track.
+
+HDR applies to all of a file's display streams or none.
+
 ## 5. `world` block
 
 - `metric_scale` (bool): true when translations are in true meters (ARKit, TUM, robot

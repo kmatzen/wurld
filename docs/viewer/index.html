@@ -147,6 +147,12 @@ function applyMetadata(tags, headline) {
     else if (chunks instanceof Uint8Array) doc.frames = unpackBinaryFrames(chunks, cameraKeys);
   }
   state.doc = doc;
+  // chromapakz's JS decoder skips HDR RGB streams — there is no 10-bit
+  // WebCodecs output path yet — so the colour pane would come up silently
+  // empty. Say so instead: the geometry still draws, and the file plays in a
+  // plain <video> element, which is what the display track is for.
+  const cpz = typeof tags.CHROMAPAKZ === 'string' ? JSON.parse(tags.CHROMAPAKZ) : {};
+  state.hdr = (cpz.rgbs || []).map(r => r.hdr).find(Boolean) || null;
   state.poses = new Map(); state.cloudCache = new Map(); state.frames = [];
   if (doc) {
     for (const f of doc.frames || []) {
@@ -186,6 +192,9 @@ function showMeta(headline) {
     state.frames.length ? `video: ${state.W}x${state.H}, ${state.frames.length} frames decoded` : '',
     state.camera ? `camera: ${state.camera.model} [${state.camera.params.map(v => +v.toFixed(2)).join(', ')}]` : '',
     state.depthMap ? `depth map: ${JSON.stringify(state.depthMap)}` : 'no depth signal',
+    state.hdr ? `HDR display track (${state.hdr.transfer}, ${state.hdr.bits}-bit): `
+              + 'colour not shown — this viewer has no 10-bit decode path. '
+              + 'Depth and poses are unaffected; open the file in a player to see it.' : '',
     doc?.world ? `world: ${JSON.stringify(doc.world)}` : '',
   ].filter(Boolean).join('\n');
 }

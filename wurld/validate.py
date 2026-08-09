@@ -95,6 +95,7 @@ def validate(path: str | Path) -> list[Finding]:
     cameras = doc.get("cameras") or {}
     _check_cameras(r, cameras, data)
     _check_signals(r, doc)
+    _check_streams(r, doc, cameras, data)
     frames = _check_frames(r, doc, tags, cameras)
     _check_rigs(r, doc, cameras)
     _check_imu(r, doc, tags, frames)
@@ -151,6 +152,30 @@ def _check_cameras(r: _Report, cameras: dict, data: bytes) -> None:
             # §4.1: calibrated resolution MUST equal the video track resolution.
             r.error("4.1", f"camera {cid!r} is calibrated {w}x{h} but the video track is "
                            f"{vw}x{vh}; intrinsics would be applied at the wrong scale")
+
+
+def _check_streams(r: _Report, doc: dict, cameras: dict, data: bytes) -> None:
+    """Display streams bind to cameras by id (SPEC §4.4)."""
+    try:
+        probe = ebml.read_all_tags(data).get("CHROMAPAKZ")
+        cpz = json.loads(probe) if isinstance(probe, str) else {}
+    except Exception:  # noqa: BLE001
+        return
+    streams = [x.get("id") for x in (cpz.get("rgbs") or []) if x.get("id")]
+    # A lone stream carries the conventional primary id "rgb" and binds to the
+    # file's single camera implicitly; the id-is-camera-id rule only has work to
+    # do once there is more than one stream to tell apart.
+    if len(streams) < 2:
+        return
+    for sid in streams:
+        if cameras and sid not in cameras:
+            r.error("4.4", f"display stream {sid!r} is not a declared camera "
+                           f"({', '.join(sorted(cameras))}) — a reader cannot tell "
+                           "which intrinsics apply to it")
+    hdr_flags = {bool(x.get("hdr")) for x in (cpz.get("rgbs") or [])}
+    if len(hdr_flags) > 1:
+        r.error("4.5", "some display streams are HDR and others are not; "
+                       "HDR applies to all of a file's streams or none")
 
 
 def _check_signals(r: _Report, doc: dict) -> None:

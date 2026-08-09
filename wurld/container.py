@@ -284,7 +284,44 @@ class Sequence:
 
     @property
     def rgb(self) -> np.ndarray | None:
+        """The primary display stream. uint8 codes, or uint16 when it is HDR."""
         return self._decode().get("rgb")
+
+    @property
+    def rgb_streams(self) -> list[str]:
+        """Camera ids that have stored pixels, primary first.
+
+        A rig may declare cameras with no stream of their own — their poses come
+        from `rigs` (see `rig_c2w`) but their pixels were never recorded.
+        """
+        probe = self.probe or {}
+        return [r.get("id") for r in (probe.get("rgbs") or []) if r.get("id")]
+
+    def rgb_for(self, camera_id: str) -> np.ndarray:
+        """One camera's pixels. Stream ids are camera ids (SPEC §4.4)."""
+        streams = self.rgb_streams
+        if streams and camera_id not in streams:
+            raise KeyError(
+                f"camera {camera_id!r} has no stored pixels; streams: {streams}"
+            )
+        decoded = self._decode()
+        per_stream = decoded.get("rgbs")
+        if isinstance(per_stream, dict) and camera_id in per_stream:
+            return per_stream[camera_id]
+        return decoded.get("rgb")
+
+    @property
+    def hdr(self) -> dict | None:
+        """The display track's HDR signalling, or None when it is SDR.
+
+        Display-referred (PQ or HLG, absolute nits) — a different thing from a
+        `float16_bits` signal, which is scene-referred radiance. A file may
+        carry both.
+        """
+        for r in ((self.probe or {}).get("rgbs") or []):
+            if r.get("hdr"):
+                return r["hdr"]
+        return None
 
     def signal(self, signal_id: str) -> np.ndarray:
         """Raw uint16 codes, exactly as stored."""
@@ -466,7 +503,7 @@ def write(
     *,
     cameras: dict[str, Camera],
     frames: list[Frame],
-    rgb: np.ndarray | None = None,
+    rgb: np.ndarray | dict[str, np.ndarray] | None = None,
     signals: dict[str, np.ndarray] | None = None,
     specs: dict[str, dict] | None = None,
     signal_meta: list[SignalMeta] | None = None,
@@ -476,6 +513,7 @@ def write(
     frames_format: str = "auto",  # "auto" | "json" | "binary"
     fps: float = 30,
     rgb_kbps: int = 2000,
+    hdr: dict | None = None,
     validate: bool = True,
 ) -> Path:
     """Encode and write a wurld file.
@@ -506,7 +544,14 @@ def write(
     n_video = None
     for arr in (signals or {}).values():
         n_video = arr.shape[0]
-    if rgb is not None:
+    if isinstance(rgb, dict):
+        # Every declared stream shares one frame grid, so they must agree on
+        # length — a short stream would silently misalign poses for that camera.
+        lengths = {cid: a.shape[0] for cid, a in rgb.items()}
+        if len(set(lengths.values())) > 1:
+            raise ValueError(f"rgb streams disagree on frame count: {lengths}")
+        n_video = next(iter(lengths.values()), None)
+    elif rgb is not None:
         n_video = rgb.shape[0]
     if n_video is None:
         raise ValueError("need rgb and/or signals")
@@ -522,11 +567,15 @@ def write(
             if f.camera not in known:
                 problems.append(f"frame {f.i}: unknown camera {f.camera!r}")
                 break
+        # All streams share one W x H (chromapakz declares it per file), so any
+        # one of them settles the resolution every camera must be calibrated at.
+        probe_rgb = next(iter(rgb.values())) if isinstance(rgb, dict) else rgb
         for cam in cameras.values():
-            if rgb is not None and (cam.width != rgb.shape[2] or cam.height != rgb.shape[1]):
+            if probe_rgb is not None and (cam.width != probe_rgb.shape[2]
+                                          or cam.height != probe_rgb.shape[1]):
                 problems.append(
                     f"camera calibrated at {cam.width}x{cam.height} but video is "
-                    f"{rgb.shape[2]}x{rgb.shape[1]} (SPEC requires equality)"
+                    f"{probe_rgb.shape[2]}x{probe_rgb.shape[1]} (SPEC requires equality)"
                 )
         for f in frames:
             if f.params is not None and len(f.params) != len(cameras[f.camera].params):
@@ -541,7 +590,25 @@ def write(
 
     # Video-track fps is presentation timing only (frame `t` values are the
     # authoritative timestamps); chromapakz requires an integer rate.
-    data = cz.encode(signals or {}, specs=specs, rgb=rgb, fps=max(1, round(fps)), rgb_kbps=rgb_kbps)
+    # rgb may be one array (single display stream) or {camera_id: array} for a
+    # rig that stores several cameras' pixels. Stream ids are camera ids, which
+    # is what lets a reader tell which intrinsics apply to which pixels; the
+    # first entry is the primary and keeps chromapakz's track 1 and name "rgb",
+    # so pre-0.7.0 readers still see exactly one RGB track.
+    rgb_arg, rgbs_arg = rgb, None
+    if isinstance(rgb, dict):
+        unknown = [k for k in rgb if k not in cameras]
+        if unknown:
+            raise ValueError(
+                f"rgb streams {unknown} have no matching camera; stream ids are "
+                f"camera ids (declared: {sorted(cameras)})"
+            )
+        rgb_arg, rgbs_arg = None, rgb
+    if hdr is not None and rgb_arg is None and rgbs_arg is None:
+        raise ValueError("hdr= was given but there is no RGB stream to apply it to")
+
+    data = cz.encode(signals or {}, specs=specs, rgb=rgb_arg, rgbs=rgbs_arg,
+                     fps=max(1, round(fps)), rgb_kbps=rgb_kbps, hdr=hdr)
 
     tags: dict[str, str | bytes] = {}
     if use_binary:
