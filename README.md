@@ -84,18 +84,25 @@ Long sequences (>10k frames) automatically pack poses into a binary frame table
 JavaScript API (`wurld-core`, no dependencies — works in browsers and Node):
 
 ```js
-import { readWurldTags, unpackFrames, WurldRecorder, StreamSplitter } from 'wurld-core';
+import { readDocument, WurldRecorder, StreamSplitter } from 'wurld-core';
 
-const tags = readWurldTags(bytes);            // SimpleTags: strings last-win, binaries concatenate
-const doc = JSON.parse(tags.WURLD);           // cameras, signals, conventions
-const keys = doc.frames_binary?.cameras ?? Object.keys(doc.cameras).sort();
-const frames = unpackFrames(tags.WURLD_FRAMES ?? tags.WURLD_POSES, keys);
-frames[0].t;                                  // seconds; .q_wxyz, .tr, .pose_valid
+const { doc, imu, rgbStreams } = readDocument(bytes);
+doc.cameras;                 // calibration, keyed by camera id
+doc.frames[0].t;             // seconds; .q_wxyz, .tr, .pose_valid
+imu.imu0?.[0];               // { t, gyro, accel }
+rgbStreams;                  // display streams present, primary first
 ```
 
-The 45-byte records are byte-identical to the Python writer's — the parity suite
-asserts it rather than assuming it. Pose precedence is `WURLD_FRAMES`, then
-`WURLD_POSES` chunks, then the JSON array (SPEC §9).
+`readDocument` resolves poses through the SPEC §9 precedence chain —
+`WURLD_FRAMES`, then concatenated `WURLD_POSES` chunks, then the JSON array —
+which is the part worth not hand-rolling: a reader that honours only the JSON
+array sees **zero poses** on any phone recording, and one that assumes a binary
+table throws on everything else. `readWurldTags` and `unpackFrames` are still
+exported for callers who want the pieces.
+
+The 45-byte records are byte-identical to the Python writer's, and all three
+readers are checked against a shared conformance corpus rather than against
+their own expectations.
 
 Writing live (`WurldRecorder`) needs a chromapakz encoder, which you supply — it
 is an optional peer dependency, so reading costs you no native install.

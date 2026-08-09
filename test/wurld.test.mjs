@@ -160,3 +160,20 @@ test('unpackFrames rejects corruption instead of inventing a camera', () => {
   assert.throws(() => unpackFrames(new Uint8Array(FRAME_RECORD_SIZE + 5), ['a']),
                 /not a multiple of 45/);
 });
+
+
+test("the README's JavaScript quickstart runs on every file shape",
+  { skip: !haveVectors && 'no vectors' }, () => {
+    // It previously hand-rolled the precedence chain as
+    //   unpackFrames(tags.WURLD_FRAMES ?? tags.WURLD_POSES, keys)
+    // which throws on a file whose poses are in the JSON array — most files.
+    for (const name of ['v01_minimal', 'v03_binary_frames', 'v06_rig_imu']) {
+      const bytes = new Uint8Array(readFileSync(vector(`${name}.wl.webm`)));
+      const { doc, imu, rgbStreams } = readDocument(bytes);
+      assert.ok(doc.frames.length > 0, `${name}: no poses resolved`);
+      assert.ok(typeof doc.frames[0].t === 'number');
+      assert.ok(doc.cameras && Object.keys(doc.cameras).length > 0);
+      assert.ok(Array.isArray(rgbStreams));
+      assert.equal(typeof imu, 'object');
+    }
+  });
