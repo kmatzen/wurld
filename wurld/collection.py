@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import random
 from bisect import bisect_right
 from dataclasses import asdict, dataclass, field
@@ -240,6 +241,20 @@ class Collection:
         self._open_index: int | None = None
         self._open_seq: container.Sequence | None = None
         self._headers: dict[int, remote.RemoteHeader] = {}
+
+        # Members may legitimately differ in resolution, camera count or bit
+        # depth — a corpus is not obliged to be uniform. Scale is different: a
+        # collection mixing metric captures with up-to-scale reconstructions
+        # will train on translations that do not share a unit, and nothing
+        # downstream can tell. The CLI says so; anything using the API directly
+        # should hear it too.
+        scales = {m.metric_scale for m in manifest.members if m.metric_scale is not None}
+        if len(scales) > 1:
+            metric = sum(1 for m in manifest.members if m.metric_scale)
+            logging.getLogger(__name__).warning(
+                "collection mixes metric_scale: %d member(s) metric, %d not — "
+                "poses do not share a unit; filter before training on them",
+                metric, len(manifest.members) - metric)
 
     @classmethod
     def read(cls, manifest_path: str | Path) -> "Collection":

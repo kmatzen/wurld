@@ -62,6 +62,11 @@ pull-based and never had the defect.
   rig, so a stereo pair keeps its calibrated baseline (measured on real EuRoC:
   11.01 cm, constant to four decimals). Found by exporting a real stereo
   sequence and noticing only one `image_raw` topic came out.
+- **A `Collection` mixing metric and up-to-scale members warns.** Resolution,
+  camera count and bit depth may legitimately differ across a corpus; scale may
+  not — poses that do not share a unit will be trained on as if they did, and
+  nothing downstream can tell. The CLI already said so; the API a training run
+  actually uses did not.
 - **`tests/test_export_matrix.py`** — every exporter against every shape of
   legal file (unposed frames, no display track, stereo, rig+IMU, HDR). Each side
   was covered and the combination was not, which is how four separate export

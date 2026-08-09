@@ -466,3 +466,59 @@ def test_streaming_a_stereo_member_yields_both_eyes(tmp_path):
         assert not np.array_equal(it["rgbs"]["cam0"], it["rgbs"]["cam1"])
         # The primary stays where a single-camera consumer expects it.
         assert np.array_equal(it["rgb"], it["rgbs"]["cam0"])
+
+
+def test_a_heterogeneous_corpus_streams(tmp_path):
+    """Members need not be uniform: mixed resolutions, stream counts, bit depths.
+
+    A real corpus is assembled from whatever was captured, so this must work
+    rather than merely not crash.
+    """
+    import shutil
+
+    root = tmp_path / "mixed"
+    root.mkdir()
+    _write_seq(root / "mono.wl.webm", 4, w=32, h=24)
+    _write_seq(root / "bigger.wl.webm", 3, w=64, h=48)
+    stereo = Path("conformance/vectors/v05_stereo.wl.webm")
+    if stereo.exists():
+        shutil.copy(stereo, root / "stereo.wl.webm")
+
+    m, failures = col.build_manifest(root, relative_to=root)
+    assert not failures
+    assert len({(x.width, x.height) for x in m.members}) > 1, "fixture is uniform"
+
+    c = col.Collection(m, root=root)
+    items = list(c.iter_frames(fields=("rgb",)))
+    assert len(items) == len(c) == m.total_frames
+    assert c.verify() == []
+
+
+def test_mixing_metric_and_unscaled_members_warns(tmp_path, caplog):
+    """Poses that do not share a unit is a training hazard, not a detail."""
+    import logging
+
+    root = tmp_path / "scales"
+    root.mkdir()
+    _write_seq(root / "metric.wl.webm", 3, metric=True)
+    _write_seq(root / "unscaled.wl.webm", 3, metric=False)
+    m, _ = col.build_manifest(root, relative_to=root)
+
+    with caplog.at_level(logging.WARNING):
+        col.Collection(m, root=root)
+    assert any("metric_scale" in r.getMessage() for r in caplog.records), \
+        "a collection mixing scaled and unscaled poses said nothing"
+
+
+def test_a_uniform_collection_stays_quiet(tmp_path, caplog):
+    """A warning that fires on everything is noise."""
+    import logging
+
+    root = tmp_path / "uniform"
+    root.mkdir()
+    _write_seq(root / "a.wl.webm", 3, metric=True)
+    _write_seq(root / "b.wl.webm", 3, metric=True)
+    m, _ = col.build_manifest(root, relative_to=root)
+    with caplog.at_level(logging.WARNING):
+        col.Collection(m, root=root)
+    assert not [r for r in caplog.records if "metric_scale" in r.getMessage()]
