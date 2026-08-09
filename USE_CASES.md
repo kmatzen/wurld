@@ -283,7 +283,8 @@ only as the pixels that saw it. Object IDs exist as a signal role; object
 
 **Apple-native playback.** QuickTime Player, iOS Photos, Quick Look and Final
 Cut cannot open the file: AVFoundation has no WebM demuxer. Desktop viewing is
-VLC or IINA, browser viewing is the hosted viewer. See Part 4 for the
+VLC or IINA (both measured, including HDR10), browser viewing is the hosted
+viewer. See Part 4 for the
 measurements and why the container choice stands.
 
 **Event cameras.** Microsecond-resolution asynchronous events have no frame
@@ -323,7 +324,7 @@ change.
 | `ffmpeg` / `ffprobe` | yes | all six tracks, addressable by title |
 | VLC 3.x | yes | yes — RGB, verified by dumping the rendered frame |
 | Chrome (WebCodecs) | yes | yes — the hosted viewer decodes natively |
-| IINA | expected, **not measured** | expected — same ffmpeg core as above |
+| IINA | yes — **measured** | yes; also decodes the HDR10 display track |
 | QuickTime Player | **no** — AVFoundation `Cannot Open` | — |
 | iOS Photos | **no** — same AVFoundation path | — |
 
@@ -332,6 +333,28 @@ an ordinary player" claim: a wurld file carries three to six video tracks, and a
 player defaulting to `signal-depth-hi` would show a grey gradient. VLC selects
 RGB (track 1) correctly. That is checked by rendering a frame, not by reading a
 track list.
+
+**HDR10 rendering, measured 2026-08-08.** Chrome and IINA both honour the PQ
+transfer function on a wurld HDR10 file. The check was not "does it look
+bright", which no one can judge reliably: two files were encoded with
+*byte-identical* decoded pixels (verified by framemd5) and only the colour tag
+differing — one BT.2020/PQ, one BT.709. Under the SDR tag all six luminance
+patches stay distinct, because the codes map straight through. Under the PQ tag
+the top patches collapse, because the player decodes PQ and tone-maps to the
+display peak. A player ignoring the tag would render the two identically. Neither
+does, so both are reading it.
+
+What that test cannot show is appearance on a real HDR panel — it was run on a
+500-nit built-in LCD with limited EDR headroom, where the top of the range has
+nowhere to go. IINA collapses everything from 400 nits up and Chrome from 1000,
+which is tone-mapping to that peak rather than a defect in either. **Still
+unverified: how these files look on a true HDR display** (XDR, Pro Display XDR,
+or an HDR TV).
+
+One incidental finding worth knowing if you generate HDR WebM by hand: ffmpeg's
+Matroska muxer drops `-color_trc`/`-color_primaries` set as output options — the
+resulting file probes as `unknown` — and needs a `setparams` filter in the chain
+instead. wurld writes the `Colour` element directly and is unaffected.
 
 ### Why WebM, given that cost
 
