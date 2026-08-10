@@ -46,7 +46,18 @@ Clusters (rewriting only the Segment size vint) also yields a valid file — ear
 writers did — but forfeits streamable metadata. Readers scan all top-level Tags
 elements regardless of position.
 
-Recommended file suffix: `.wl.webm` (plain `.webm` also valid).
+Recommended file suffix: **`.wl.webm`** (plain `.webm` also valid).
+
+The trailing `.webm` is the load-bearing part and must not be dropped. Operating
+systems, players, browsers and CDNs key off the last suffix, so a wurld file
+identifies as `video/webm` everywhere and an ordinary player just plays it —
+which is the property the whole design is built on. A distinct suffix such as
+`.wurld` would forfeit it. The leading `.wl` only marks the file as carrying this
+metadata; the same shape as OME-TIFF's `.ome.tiff`, and for the same reason.
+
+Tools MUST NOT assume the `.wl` part is present: it is a recommendation, not a
+requirement, and a reader identifies a wurld file by its `WURLD` tag rather than
+by its name.
 
 ## 3. Canonical conventions (fixed in 1.0)
 

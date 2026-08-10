@@ -522,3 +522,40 @@ def test_a_uniform_collection_stays_quiet(tmp_path, caplog):
     with caplog.at_level(logging.WARNING):
         col.Collection(m, root=root)
     assert not [r for r in caplog.records if "metric_scale" in r.getMessage()]
+
+
+def test_indexing_finds_both_legal_suffixes(tmp_path):
+    """SPEC §2 allows plain `.webm`; globbing only `*.wl.webm` found none of them.
+
+    A corpus named the other legal way indexed as nothing, silently.
+    """
+    root = tmp_path / "suffixes"
+    root.mkdir()
+    _write_seq(root / "a.wl.webm", 3)
+    _write_seq(root / "b.webm", 4)
+
+    m, failures = col.build_manifest(root, relative_to=root)
+    assert failures == []
+    assert sorted(x.uri for x in m.members) == ["a.wl.webm", "b.webm"]
+    assert m.total_frames == 7
+
+
+def test_a_plain_webm_is_not_a_member_and_not_a_failure(tmp_path):
+    """A directory holding ordinary video beside captures is unremarkable.
+
+    Distinguished by sniffing for the WURLD tag rather than by matching an error
+    message: a non-wurld file can fail a header read at several points first.
+    """
+    import chromapakz as cz
+
+    root = tmp_path / "mixedbag"
+    root.mkdir()
+    _write_seq(root / "capture.wl.webm", 3)
+    (root / "holiday.webm").write_bytes(
+        cz.encode({}, rgb=np.zeros((3, 16, 16, 4), np.uint8), fps=30))
+    (root / "broken.wl.webm").write_bytes(b"\x1a\x45\xdf\xa3 WURLD but truncated")
+
+    m, failures = col.build_manifest(root, relative_to=root, on_error="skip")
+    assert [x.uri for x in m.members] == ["capture.wl.webm"]
+    # The plain video is absent from both lists; the broken wurld file is reported.
+    assert [Path(f[0]).name for f in failures] == ["broken.wl.webm"]

@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **`wurld index` skipped valid files named `.webm`.** SPEC §2 allows the plain
+  suffix alongside the recommended `.wl.webm`, but the default glob was
+  `*.wl.webm`, so a corpus named the other legal way indexed as nothing without
+  a word. The default is now `*.webm`, which covers both.
+- A `.webm` that is *not* a wurld file is now passed over in silence rather than
+  reported as a broken member — a directory holding ordinary video beside
+  captures is unremarkable. The two are told apart by whether the container
+  parses and lacks a `WURLD` tag, not by the error text and not by sniffing for
+  the string, since truncated rubbish can contain it.
+
+### Changed
+
+- SPEC §2 now says *why* the suffix is `.wl.webm`: the trailing `.webm` is
+  load-bearing, because every OS, player and CDN keys off the last suffix, and a
+  distinct suffix like `.wurld` would forfeit the property the design is built
+  on. Same shape as OME-TIFF's `.ome.tiff`. Tools must not assume `.wl` is
+  present.
+
 ## 1.3.0 — 2026-08-09
 
 Streaming: sequences that did not fit in memory now convert, in Python and in

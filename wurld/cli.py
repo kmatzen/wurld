@@ -461,7 +461,8 @@ def main(argv=None) -> int:
     p_idx.add_argument("sources", nargs="+",
                        help="files, directories (globbed recursively), or http(s) urls")
     p_idx.add_argument("-o", "--out", default="collection.json", help="manifest path")
-    p_idx.add_argument("--pattern", default="*.wl.webm", help="glob used inside directories")
+    p_idx.add_argument("--pattern", default="*.webm",
+                       help="glob used inside directories (covers .wl.webm and plain .webm)")
     p_idx.add_argument("--checksum", action="store_true",
                        help="record sha256 per member (reads every byte; slow)")
     p_idx.add_argument("--absolute", action="store_true",

@@ -35,7 +35,7 @@ from typing import Iterable, Iterator
 
 import numpy as np
 
-from . import container, remote
+from . import container, ebml, remote
 
 MANIFEST_VERSION = 1
 _REMOTE_PREFIXES = ("http://", "https://")
@@ -70,6 +70,25 @@ class Member:
     def from_json(cls, d: dict) -> "Member":
         known = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in d.items() if k in known})
+
+
+def _is_foreign_video(uri: str) -> bool:
+    """A readable WebM that simply is not a wurld file.
+
+    Distinguishes "not one of ours" from "one of ours, and broken", which
+    deserve opposite treatment: a holiday video beside the captures should be
+    passed over in silence, while a corrupt capture must be reported. The test
+    is whether the container parses *and* lacks a WURLD tag — not whether the
+    bytes happen to contain the string, since truncated rubbish can carry it,
+    and not the error text, since a foreign file can fail at several points.
+    """
+    if _is_remote(uri):
+        return False                    # cannot check cheaply; report the failure
+    try:
+        tags = ebml.read_all_tags(Path(uri).read_bytes())
+    except Exception:                   # noqa: BLE001 - unparseable is a failure
+        return False
+    return "WURLD" not in tags
 
 
 def describe(uri: str | Path, *, checksum: bool = False) -> Member:
@@ -180,13 +199,22 @@ class Manifest:
 def build_manifest(
     sources: Iterable[str | Path] | str | Path,
     *,
-    pattern: str = "*.wl.webm",
+    pattern: str = "*.webm",
     checksum: bool = False,
     relative_to: Path | None = None,
     on_error: str = "raise",
     description: str = "",
 ) -> tuple[Manifest, list[tuple[str, str]]]:
     """Describe every file in ``sources``; a directory is globbed recursively.
+
+    The default pattern is ``*.webm``, which covers both the recommended
+    ``.wl.webm`` suffix and the plain ``.webm`` that SPEC §2 also allows. Globbing
+    only ``*.wl.webm`` meant a corpus named the other legal way indexed as
+    nothing, without a word.
+
+    A ``.webm`` with no ``WURLD`` tag is a plain video, not a broken member: it
+    is skipped quietly rather than reported, because a directory holding both is
+    ordinary. A file that *is* wurld and cannot be read is a failure.
 
     Returns ``(manifest, failures)``. ``on_error="skip"`` records unreadable
     files in ``failures`` instead of raising — a collection built over ten
@@ -207,11 +235,18 @@ def build_manifest(
         else:
             paths.append(str(p))
 
-    members, failures = [], []
+    members, failures, not_wurld = [], [], 0
     for uri in paths:
         try:
             m = describe(uri, checksum=checksum)
         except Exception as exc:                       # noqa: BLE001 - reported, not swallowed
+            if _is_foreign_video(uri):
+                # A plain WebM sitting beside the captures. Not a member and not
+                # a fault; counted so a surprising total can be explained.
+                # Sniffed rather than matched on the error text, because a
+                # non-wurld file can fail at several different points first.
+                not_wurld += 1
+                continue
             if on_error == "raise":
                 raise
             failures.append((uri, f"{type(exc).__name__}: {exc}"))
@@ -223,6 +258,10 @@ def build_manifest(
                 pass                                   # outside the root; keep it absolute
         members.append(m)
 
+    if not_wurld:
+        logging.getLogger(__name__).info(
+            "skipped %d .webm file(s) with no WURLD tag (plain video, not members)",
+            not_wurld)
     return Manifest(members=members, description=description), failures
 
 
