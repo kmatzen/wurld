@@ -362,8 +362,9 @@ the separate scene-manifest concern reserved in SPEC §11.
 
 ## Status / verified
 
-- **279 Python tests, 13 JavaScript, 11 C++ unit checks**, green on Linux and
-  macOS. Depth round-trips bit-exactly through VP9; poses, timestamps and
+- **Python, JavaScript and C++ suites green on Linux and macOS** (see the
+  `test` workflow for the current counts — a number written here goes stale
+  within a day). Depth round-trips bit-exactly through VP9; poses, timestamps and
   intrinsics survive every converter round trip; binary frame tables, rigs, IMU
   streams and both Stray resampling policies are covered.
 - **Three readers agree** on a shared conformance corpus whose expectations are

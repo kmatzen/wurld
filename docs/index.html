@@ -74,12 +74,17 @@ npm install wurld-core     # JavaScript, byte-identical records</code></pre>
 
   <h2>Or use no tools of ours at all</h2>
   <p>The metadata sits in standard Matroska tags, so <code>ffprobe</code> prints
-  it — cameras, conventions, signal semantics, and every pose:</p>
+  it — cameras, conventions, signal semantics, and, on a file whose poses are in
+  the JSON array, the poses too:</p>
   <pre><code>ffprobe -v error -show_entries format_tags=WURLD \
         -of default=nw=1:nk=1 scene.wl.webm</code></pre>
   <p><a href="https://github.com/kmatzen/wurld/blob/main/EXTRACTING.md">EXTRACTING.md</a>
   is the full cookbook: poses to CSV, intrinsics, RGB frames, and depth in metres
-  with nothing but ffmpeg and arithmetic — including the triangle-fold and
+  with nothing but ffmpeg and arithmetic. It also covers the case this command
+  does not reach: a long or live recording stores its poses in a binary tag that
+  ffmpeg's Matroska demuxer drops, so <code>frames</code> comes back empty and a
+  <code>frames_binary</code> descriptor says how many are really there. Including
+  the triangle-fold and
   inverse-depth formulas, checked against the reference reader to 1.5 µm.</p>
 
   <h2>Sample</h2>
