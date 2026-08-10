@@ -312,3 +312,55 @@ def test_older_format_versions_still_read_and_validate(good, tmp_path):
 
     assert v.validate(aged) == []
     assert len(container.read(aged).frames) == len(container.read(good).frames)
+
+
+def _multi_cluster(path, n=150, w=64, h=48):
+    """Long enough to span several Clusters, so one can be removed."""
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    rgb = np.stack([
+        np.dstack([np.clip((0.5 + 0.4 * np.sin(xx / 5 + i * 0.3)) * 255, 0, 255)] * 3
+                  + [np.full((h, w), 255, np.float32)]).astype(np.uint8) for i in range(n)])
+    f = 1.1 * w
+    wl.write(path, cameras={"0": wl.Camera("PINHOLE", w, h, [f, f, w / 2, h / 2])},
+             frames=[wl.Frame(i=i, t=i / 30, camera="0", q_wxyz=(1.0, 0.0, 0.0, 0.0),
+                              tr=(0.01 * i, 0.0, 0.5)) for i in range(n)],
+             rgb=rgb, world={"metric_scale": True}, fps=30)
+    return path
+
+
+def _drop_clusters_after_the_first(src, dest):
+    """Keep the header, one Cluster and the trailing tags: a plausible truncation."""
+    data = src.read_bytes()
+    seg, ps, pe = ebml._segment_bounds(data)
+    cl = [(es, pend) for eid, es, _p, pend in ebml._top_level(data, ps, pe)
+          if eid == ebml.CLUSTER]
+    assert len(cl) > 2, "the fixture must span several Clusters"
+    payload = data[ps:cl[0][1]] + data[cl[-1][1]:pe]
+    size = len(payload).to_bytes(8, "big")
+    size = bytes([size[0] | 0x01]) + size[1:]
+    dest.write_bytes(data[:seg] + b"\x18\x53\x80\x67" + size + payload + data[pe:])
+    return dest
+
+
+def test_a_truncated_file_is_reported(tmp_path):
+    """Metadata and poses intact, most of the video gone — this used to pass.
+
+    Nothing else notices: the document is self-consistent, every pose is well
+    formed, and a reader reports the full frame count. Only the pixels are
+    missing.
+    """
+    src = _multi_cluster(tmp_path / "full.wl.webm")
+    assert v.validate(src) == [], "the healthy fixture must be clean"
+
+    cut = _drop_clusters_after_the_first(src, tmp_path / "cut.wl.webm")
+    findings = v.validate(cut)
+    assert _has(findings, "error", "9", "video are missing"), findings
+    # The poses survive, which is exactly why this was invisible.
+    assert len(container.read(cut).frames) == 150
+
+
+def test_a_healthy_file_is_not_accused_of_truncation(tmp_path):
+    """A check that fires on intact files would be worse than none."""
+    for n in (4, 40, 150):
+        src = _multi_cluster(tmp_path / f"ok{n}.wl.webm", n=n)
+        assert not [f for f in v.validate(src) if "missing" in f.message], n

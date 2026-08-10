@@ -27,6 +27,14 @@ runs its tracks concurrently — a real TUM conversion drops from 106 s to 87 s.
 
 ### Fixed
 
+- **`wurld validate` now catches a truncated file.** A copy that lost Clusters —
+  an interrupted transfer, a partial upload — keeps its header and pose table,
+  so the document stays self-consistent, every pose is well formed, and a reader
+  reports the full frame count. Only the video is gone. A 150-frame file cut
+  after its first Cluster carried 30 frames of pixels, reported 150 poses, and
+  produced no findings. The check compares the declared count against the blocks
+  actually present (`chromapakz.frames_present`, new in 0.9.0) and also reports
+  poses that reference frames past the end of the video.
 - **EXTRACTING.md never mentioned the second camera.** A multi-camera file
   carries the other streams titled by camera id, and the recipe now shows how to
   reach them — with the warning that the id is the only thing binding those

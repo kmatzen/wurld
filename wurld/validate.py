@@ -99,6 +99,7 @@ def validate(path: str | Path) -> list[Finding]:
     frames = _check_frames(r, doc, tags, cameras)
     _check_rigs(r, doc, cameras)
     _check_imu(r, doc, tags, frames)
+    _check_video_is_all_there(r, data, frames)
     _check_layout(r, data, tags)
 
     order = {ERROR: 0, WARNING: 1, NOTE: 2}
@@ -318,6 +319,54 @@ def _check_imu(r: _Report, doc: dict, tags: dict, frames: list) -> None:
             continue
         if len(buf) % 32:
             r.error("8.3", f"WURLD_IMU_{stream_id} is {len(buf)} bytes, not a multiple of 32")
+
+
+def _check_video_is_all_there(r: _Report, data: bytes, frames: list) -> None:
+    """The container's declared frame count against the blocks actually present.
+
+    A file can lose Clusters — a truncated copy, an interrupted transfer, a
+    partial upload — while keeping its header and its pose table intact. Nothing
+    else here notices: the metadata is self-consistent, every pose is well
+    formed, and a reader happily reports the full frame count. Only the video is
+    gone. Measured on a 150-frame file cut after its first Cluster: 30 frames of
+    pixels, 150 poses, and no findings before this check existed.
+
+    Needs chromapakz >= 0.9.0 for `frames_present` (ChromaPakZ #58); older
+    versions cannot answer the question, so the check is skipped rather than
+    guessed at.
+    """
+    try:
+        import chromapakz as cz
+
+        if not hasattr(cz, "frames_present"):
+            return
+        declared = int(cz.probe(data).get("frames", 0))
+        present = int(cz.frames_present(data))
+    except Exception:  # noqa: BLE001 — an unreadable payload is reported elsewhere
+        return
+
+    if declared <= 0:
+        return
+    if present < declared:
+        r.error("9", f"the file declares {declared} video frames but carries {present}: "
+                     f"{declared - present} frame(s) of video are missing, though the "
+                     "metadata and poses are intact — the file is truncated")
+    elif present > declared:
+        r.error("9", f"the file carries {present} video frames but declares {declared}; "
+                     "a reader sizing from the header would silently ignore the rest")
+
+    # Poses that point past the end of the video cannot be used for anything.
+    # `frames` is Frame objects from a binary table and plain dicts from the
+    # JSON array, so read the index either way rather than assuming one.
+    def index_of(f):
+        return f.i if hasattr(f, "i") else f.get("i")
+
+    if frames and declared:
+        beyond = [i for i in (index_of(f) for f in frames)
+                  if isinstance(i, int) and i >= declared]
+        if beyond:
+            r.error("9", f"{len(beyond)} pose(s) reference frames at or past the end of "
+                         f"the video ({declared} frames); first is index {beyond[0]}")
 
 
 def _check_layout(r: _Report, data: bytes, tags: dict) -> None:
