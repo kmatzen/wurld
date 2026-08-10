@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 — 2026-08-09
+
+Streaming: sequences that did not fit in memory now convert, in Python and in
+C++. Plus a sweep for assumptions that newer features had quietly invalidated —
+one display stream, 8-bit pixels, every frame posed — which turned up seven
+defects across the exporters, none of which had failed a test.
+
+Requires **chromapakz 0.9.0**, which carries two fixes written for this work:
+partial decodes no longer allocate for the whole sequence, and batch encoding
+runs its tracks concurrently — a real TUM conversion drops from 106 s to 87 s.
+
+`wurld-core` (JavaScript) is unchanged since 1.2.0 and stays there.
 
 ### Changed
 
@@ -28,15 +39,6 @@
   recipe now resolves planes by track title, and `tests/test_extracting_doc.py`
   executes it against both a mono and a stereo file, checking the result matches
   the Python reader (1.2e-07 m, identical NaN pattern).
-
-## 1.3.0 — 2026-08-09
-
-Streaming: sequences that did not fit in memory now convert, in Python and in
-C++. Plus a sweep for assumptions that newer features had quietly invalidated —
-one display stream, 8-bit pixels, every frame posed — which turned up seven
-defects across the exporters, none of which had failed a test.
-
-`wurld-core` (JavaScript) is unchanged since 1.2.0 and stays there.
 
 ### Added
 
@@ -307,7 +309,6 @@ Monte Carlo noise. Denoise before archiving.
   additionally diffed field-by-field against Python on the example files.
 - **Sharding is disjoint and complete** across ranks x DataLoader workers, with
   real multi-worker DataLoaders rather than simulated ones.
-
 
 ## 1.1.1 — 2026-08-06
 
