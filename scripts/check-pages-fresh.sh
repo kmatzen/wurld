@@ -44,18 +44,26 @@ else
 fi
 
 # --- 2. docs/ is what viewer/ regenerates to ---------------------------------
-before="$(git status --porcelain -- docs/ | wc -l | tr -d ' ')"
-if [ "$before" != "0" ]; then
-  echo "note: docs/ has uncommitted changes; checking against the working tree" >&2
-fi
+#
+# The comparison is working tree vs. freshly generated, NOT vs. git HEAD. Diffing
+# against HEAD conflates two different things: "docs/ does not match its source"
+# (what we care about) and "docs/ has been regenerated but not committed yet"
+# (the normal edit-then-commit flow, which is fine). An earlier version made that
+# mistake and, worse, ran `git checkout -- docs/` to tidy up — which discards a
+# correct regeneration the caller had just made.
+snapshot="$(mktemp -d)"
+trap 'rm -rf "$snapshot"' EXIT
+cp -R docs/viewer "$snapshot/viewer"
 
 scripts/build-pages.sh >/dev/null
 
-if ! git diff --quiet -- docs/; then
+if ! diff -r -q "$snapshot/viewer" docs/viewer >/dev/null 2>&1; then
   echo "error: docs/ is stale — regenerating it changed these files:" >&2
-  git diff --name-only -- docs/ >&2
+  diff -r -q "$snapshot/viewer" docs/viewer 2>&1 | sed 's/^/       /' >&2
   echo "       Run scripts/build-pages.sh and commit the result." >&2
-  git checkout -- docs/ 2>/dev/null || true
+  # Put back exactly what was there; never reach for git, which cannot tell a
+  # stale file from an uncommitted-but-correct one.
+  rm -rf docs/viewer && cp -R "$snapshot/viewer" docs/viewer
   fail=1
 else
   echo "ok: docs/ matches what viewer/ generates"

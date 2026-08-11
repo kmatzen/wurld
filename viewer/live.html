@@ -296,6 +296,14 @@ document.getElementById('start').onclick = async () => {
     await new Promise(r => setTimeout(r, 5));
   }
 
+  // Finalising flushes the encoder and then decodes the whole file back. Both
+  // are asynchronous and neither reports progress, so until the verdict lands
+  // the page looks identical to one where Stop did nothing. Say what is
+  // happening: a stall here is then visible instead of indistinguishable from
+  // an ignored click. (Seen once on a loaded CI runner, where the decode never
+  // completed and the panel simply stayed as it was.)
+  document.getElementById('verdict').textContent = 'finalising…';
+
   await recorder.finish();
   netDec.finish();
 

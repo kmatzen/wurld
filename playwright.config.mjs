@@ -13,6 +13,11 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
+  // live.html drives a full WebCodecs encode *and* decode at once. Four of those
+  // in parallel on a 2-core CI runner wedged one pipeline hard enough that it
+  // had not recovered 40s after the machine went quiet. One worker on CI trades
+  // about a minute of wall clock for a result that means something.
+  workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? 'list' : 'line',
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
