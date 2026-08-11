@@ -73,3 +73,27 @@ jobs:
         run: |
           npm pack
           tar tzf wurld-core-*.tgz
+
+  # The viewer decodes through chromapakz, which needs WebCodecs, and draws into
+  # 2D canvases and WebGL — none of which jsdom has. Testing it means running it.
+  # Five defects were found in this page by hand before it had any test at all.
+  viewer-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: install chromium
+        run: npx playwright install --with-deps chromium
+      - name: viewer behaviour in a real browser
+        run: npm run test:viewer
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-trace
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
