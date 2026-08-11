@@ -43,9 +43,11 @@ Result: `ios/build/export/WurldCam.ipa`, 2.9 MB, signed
    there — "WurldCam" may be taken, and the listing name need not match the
    binary's display name.
 
-2. **Host the privacy policy.** A URL is mandatory. `ios/PRIVACY.md` is written
-   and accurate; publish it (GitHub Pages on the `wurld` repo works, but that
-   repo is currently **private** — the URL must be publicly reachable).
+2. ~~**Host the privacy policy.**~~ **Done** — <https://kmatzen.com/wurld/privacy.html>.
+   `kmatzen/wurld` is public and GitHub Pages serves `/docs`, so `docs/privacy.html`
+   is live over HTTPS. This entry previously said the repo was private and blocked;
+   it is not. Note `https_enforced` is off on the Pages site, so give App Store
+   Connect the `https://` URL explicitly rather than relying on a redirect.
 
 3. **Screenshots.** Required: 6.9" iPhone, 1290×2796 or 1320×2868. Take them on
    your 15 Pro (Volume-Up + Side), mid-capture. The 15 Pro shoots 1179×2556,
