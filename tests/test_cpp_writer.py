@@ -104,7 +104,7 @@ def spec(n=6, *, cameras=None, frames_format="auto", imu=None, rigs=None,
 
 def attach(tools, tmp_path, name, sp, *, n=6, signals=True):
     src = bare_webm(tmp_path / f"{name}_src.webm", n, signals=signals)
-    out = tmp_path / f"{name}.wl.webm"
+    out = tmp_path / f"{name}.wurld.webm"
     spec_path = tmp_path / f"{name}.spec.json"
     spec_path.write_text(json.dumps(sp))
     r = subprocess.run([str(tools["attach"]), str(src), str(out), str(spec_path)],
@@ -278,7 +278,7 @@ def test_writer_rejects_a_frame_naming_an_undeclared_camera(tools, tmp_path):
     spec_path = tmp_path / "ghost.spec.json"
     spec_path.write_text(json.dumps(sp))
     r = subprocess.run([str(tools["attach"]), str(src),
-                        str(tmp_path / "ghost.wl.webm"), str(spec_path)],
+                        str(tmp_path / "ghost.wurld.webm"), str(spec_path)],
                        capture_output=True, text=True)
     # Writing index 0 instead would silently attribute the frame to the wrong
     # camera, which no reader could detect.
@@ -291,7 +291,7 @@ def test_writer_rejects_malformed_embedded_json(tools, tmp_path):
     spec_path = tmp_path / "bad.spec.json"
     spec_path.write_text('{"cameras":{},"frames":[],"world":"not an object"}')
     r = subprocess.run([str(tools["attach"]), str(src),
-                        str(tmp_path / "bad.wl.webm"), str(spec_path)],
+                        str(tmp_path / "bad.wurld.webm"), str(spec_path)],
                        capture_output=True, text=True)
     assert r.returncode == 1
     assert "json object" in r.stderr or "not valid json" in r.stderr
@@ -300,7 +300,7 @@ def test_writer_rejects_malformed_embedded_json(tools, tmp_path):
 def test_attaching_twice_replaces_rather_than_accumulates(tools, tmp_path):
     """Re-attaching must not leave two WURLD documents or two Cues elements."""
     once, _ = attach(tools, tmp_path, "once", spec(n=5), n=5)
-    twice = tmp_path / "twice.wl.webm"
+    twice = tmp_path / "twice.wurld.webm"
     spec_path = tmp_path / "twice.spec.json"
     spec_path.write_text(json.dumps(spec(n=5)))
     r = subprocess.run([str(tools["attach"]), str(once), str(twice), str(spec_path)],

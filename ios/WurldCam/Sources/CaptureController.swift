@@ -14,11 +14,11 @@ import simd
 ///     rgbd/<N>.depth      LZFSE float32 meters, shape (dh, dw)
 ///     rgbd/<N>.conf       LZFSE uint8 ARKit confidence 0/1/2
 ///
-/// Import on the desktop with `wurld convert capture.r3d out.wl.webm`.
+/// Import on the desktop with `wurld convert capture.r3d out.wurld.webm`.
 /// Frames stay in sensor (landscape) orientation so poses and pixels agree;
 /// the importer's ARKit RUB->RDF conversion assumes exactly that.
 enum CaptureFormat: String, CaseIterable, Identifiable {
-    case wurld = ".wl.webm"
+    case wurld = ".wurld.webm"
     case r3d = ".r3d"
     var id: String { rawValue }
 }

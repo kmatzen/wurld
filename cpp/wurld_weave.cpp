@@ -5,7 +5,7 @@
 // them as files and interleaves the metadata, which is exactly what a robot's
 // encoder callback would do, with the callback replaced by a directory listing.
 //
-//   wurld_weave <chunkdir> <out.wl.webm> <spec.json>
+//   wurld_weave <chunkdir> <out.wurld.webm> <spec.json>
 //
 // chunkdir holds chunk_00000.bin, chunk_00001.bin, ... in encoder order.
 // spec.json is the same shape wurld_attach takes: cameras, frames, imu, world,
@@ -114,7 +114,7 @@ wurld::WriteDoc parse_spec(const std::string& text, std::vector<wurld::Frame>& f
 
 int main(int argc, char** argv) {
     if (argc < 4) {
-        std::fprintf(stderr, "usage: wurld_weave <chunkdir> <out.wl.webm> <spec.json>\n");
+        std::fprintf(stderr, "usage: wurld_weave <chunkdir> <out.wurld.webm> <spec.json>\n");
         return 2;
     }
     try {

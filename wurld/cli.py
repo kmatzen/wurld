@@ -416,7 +416,7 @@ def main(argv=None) -> int:
     p_trim.set_defaults(func=_cmd_trim)
 
     p_demo = sub.add_parser("demo", help="write a synthetic demo sequence")
-    p_demo.add_argument("out", nargs="?", default="demo.wl.webm")
+    p_demo.add_argument("out", nargs="?", default="demo.wurld.webm")
     p_demo.add_argument("--frames", type=int, default=90)
     p_demo.add_argument("--width", type=int, default=480)
     p_demo.add_argument("--height", type=int, default=360)
@@ -462,7 +462,7 @@ def main(argv=None) -> int:
                        help="files, directories (globbed recursively), or http(s) urls")
     p_idx.add_argument("-o", "--out", default="collection.json", help="manifest path")
     p_idx.add_argument("--pattern", default="*.webm",
-                       help="glob used inside directories (covers .wl.webm and plain .webm)")
+                       help="glob used inside directories (covers .wurld.webm and plain .webm)")
     p_idx.add_argument("--checksum", action="store_true",
                        help="record sha256 per member (reads every byte; slow)")
     p_idx.add_argument("--absolute", action="store_true",

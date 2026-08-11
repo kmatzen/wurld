@@ -18,7 +18,7 @@ def mcap_file(scene, tmp_path_factory):
     import chromapakz as cz
     from tests.conftest import FAR, NEAR
 
-    p = tmp_path_factory.mktemp("mcap") / "scene.wl.webm"
+    p = tmp_path_factory.mktemp("mcap") / "scene.wurld.webm"
     imu = wl.ImuStream("imu0", np.column_stack([
         np.linspace(0.0, 0.3, 20), np.full((20, 3), 0.01), np.full((20, 3), 3.27)
     ]), rate_hz=66.0)

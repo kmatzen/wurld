@@ -10,7 +10,7 @@ from wurld.converters import detect
 
 
 def test_binary_frames_roundtrip(scene, tmp_path):
-    p = tmp_path / "bin.wl.webm"
+    p = tmp_path / "bin.wurld.webm"
     wl.write(p, cameras=scene["cameras"], frames=scene["frames"], rgb=scene["rgba"],
              frames_format="binary")
     seq = wl.read(p)
@@ -32,7 +32,7 @@ def test_binary_frames_roundtrip(scene, tmp_path):
 
 def test_binary_frames_pose_invalid(scene, tmp_path):
     frames = list(scene["frames"][:3]) + [wl.Frame(i=3, t=scene["frames"][3].t, pose_valid=False)]
-    p = tmp_path / "inv.wl.webm"
+    p = tmp_path / "inv.wurld.webm"
     wl.write(p, cameras=scene["cameras"], frames=frames, rgb=scene["rgba"][:4],
              frames_format="binary")
     seq = wl.read(p)
@@ -41,7 +41,7 @@ def test_binary_frames_pose_invalid(scene, tmp_path):
 
 
 def test_auto_stays_json_below_threshold(scene, tmp_path):
-    p = tmp_path / "auto.wl.webm"
+    p = tmp_path / "auto.wurld.webm"
     wl.write(p, cameras=scene["cameras"], frames=scene["frames"], rgb=scene["rgba"])
     from wurld import ebml
     assert ebml.read_all_tags(p.read_bytes()).get("WURLD_FRAMES") is None
@@ -62,7 +62,7 @@ def test_per_frame_intrinsics(scene, tmp_path):
     f0 = frames[0]
     override = [200.0, 200.0, 63.5, 47.5]
     frames[0] = wl.Frame(i=f0.i, t=f0.t, q_wxyz=f0.q_wxyz, tr=f0.tr, params=override)
-    p = tmp_path / "ov.wl.webm"
+    p = tmp_path / "ov.wurld.webm"
     wl.write(p, cameras=scene["cameras"], frames=frames, rgb=scene["rgba"])
     seq = wl.read(p)
     assert seq.frames[0].params == override
@@ -85,7 +85,7 @@ def test_rigs_roundtrip_and_derivation(scene, tmp_path):
         "0": {"q_wxyz": [1, 0, 0, 0], "tr": [0, 0, 0]},
         "1": {"q_wxyz": [1, 0, 0, 0], "tr": [baseline, 0, 0]},
     }, "description": "stereo"}}
-    p = tmp_path / "rig.wl.webm"
+    p = tmp_path / "rig.wurld.webm"
     wl.write(p, cameras={**scene["cameras"], "1": cam1}, frames=scene["frames"],
              rgb=scene["rgba"], rigs=rigs)
     seq = wl.read(p)
@@ -116,7 +116,7 @@ def test_imu_roundtrip(scene, tmp_path):
     imu = wl.ImuStream("imu0", samples, rate_hz=500.0,
                        extrinsics={"q_wxyz": [1, 0, 0, 0], "tr": [0.01, -0.002, 0.0]},
                        description="synthetic imu")
-    p = tmp_path / "imu.wl.webm"
+    p = tmp_path / "imu.wurld.webm"
     wl.write(p, cameras=scene["cameras"], frames=scene["frames"], rgb=scene["rgba"], imu=[imu])
     seq = wl.read(p)
     got = seq.imu["imu0"]
@@ -129,7 +129,7 @@ def test_imu_roundtrip(scene, tmp_path):
 
 def test_v01_reader_sees_v02_as_valid(scene, tmp_path):
     # a file with binary frames + imu still probes/decodes as plain wurld
-    p = tmp_path / "fwd.wl.webm"
+    p = tmp_path / "fwd.wurld.webm"
     wl.write(p, cameras=scene["cameras"], frames=scene["frames"], rgb=scene["rgba"],
              frames_format="binary",
              imu=[wl.ImuStream("x", np.zeros((3, 7)))])
@@ -193,7 +193,7 @@ def test_stray_import(stray_fixture, scene, tmp_path):
     from wurld.converters import stray
 
     assert detect(stray_fixture) == "stray"
-    out = tmp_path / "stray.wl.webm"
+    out = tmp_path / "stray.wurld.webm"
     stray.from_stray(stray_fixture, out)
     seq = wl.read(out)
 
@@ -222,7 +222,7 @@ def test_stray_import(stray_fixture, scene, tmp_path):
 def test_stray_import_at_rgb(stray_fixture, scene, tmp_path):
     from wurld.converters import stray
 
-    out = tmp_path / "stray_rgb.wl.webm"
+    out = tmp_path / "stray_rgb.wurld.webm"
     stray.from_stray(stray_fixture, out, at="rgb")
     seq = wl.read(out)
     H, W = scene["rgb"].shape[1:3]

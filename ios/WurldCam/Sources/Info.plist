@@ -25,7 +25,7 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>WurldCam records posed RGBD captures with the camera and LiDAR.</string>
+	<string>WurldCam uses the camera and LiDAR scanner to record a 3D capture. Each frame's colour image, per-pixel depth and camera position are written to a file on this device — for example, walking around a chair records a short clip you can open on a computer and view in 3D. Recordings stay on this device and are never uploaded.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchScreen</key>

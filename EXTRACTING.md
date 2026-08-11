@@ -5,7 +5,7 @@ Everything below uses only `ffmpeg`/`ffprobe` plus `python3` for arithmetic. No
 Matroska tags was that standard tools can read it — this file is that claim,
 checked.
 
-`$F` is a `.wl.webm` file throughout.
+`$F` is a `.wurld.webm` file throughout.
 
 ## What is in the file
 
@@ -108,7 +108,7 @@ field carries the true timestamp and is authoritative.
 Add the track to a file that lacks one:
 
 ```sh
-wurld pose-track in.wl.webm out.wl.webm      # needs ffmpeg on PATH
+wurld pose-track in.wurld.webm out.wurld.webm      # needs ffmpeg on PATH
 ```
 
 > **Do not do this by hand with `ffmpeg -i in.webm -i poses.vtt -c copy`.**
@@ -180,7 +180,7 @@ touching the values.
 ```python
 import json, subprocess, numpy as np
 
-F = "scene.wl.webm"
+F = "scene.wurld.webm"
 doc = json.loads(subprocess.run(
     ["ffprobe", "-v", "error", "-show_entries", "format_tags=WURLD",
      "-of", "default=nw=1:nk=1", F], capture_output=True, text=True).stdout)

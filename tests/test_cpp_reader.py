@@ -149,7 +149,7 @@ def test_cpp_unit_tests_pass(wurld_info):
 
 def test_json_frames_agree(wurld_info, tmp_path):
     tool, _ = wurld_info
-    p = _write(tmp_path / "json.wl.webm", n=6, frames_format="json")
+    p = _write(tmp_path / "json.wurld.webm", n=6, frames_format="json")
     got, _ = assert_agrees(tool, p)
     assert len(got["frames"]) == 6
 
@@ -157,7 +157,7 @@ def test_json_frames_agree(wurld_info, tmp_path):
 def test_binary_frame_table_agrees(wurld_info, tmp_path):
     """The path ffmpeg cannot read, and the one most likely to diverge."""
     tool, _ = wurld_info
-    p = _write(tmp_path / "bin.wl.webm", n=8, frames_format="binary")
+    p = _write(tmp_path / "bin.wurld.webm", n=8, frames_format="binary")
     # Confirm the fixture really took the binary path, or this proves nothing.
     from wurld import ebml
     tags = ebml.read_all_tags(p.read_bytes())
@@ -168,7 +168,7 @@ def test_binary_frame_table_agrees(wurld_info, tmp_path):
 def test_unposed_frames_agree(wurld_info, tmp_path):
     tool, _ = wurld_info
     for fmt in ("json", "binary"):
-        p = _write(tmp_path / f"unposed_{fmt}.wl.webm", n=7, unposed=(2, 5),
+        p = _write(tmp_path / f"unposed_{fmt}.wurld.webm", n=7, unposed=(2, 5),
                    frames_format=fmt)
         got, seq = assert_agrees(tool, p)
         assert [g["i"] for g in got["frames"] if not g["pose_valid"]] == [2, 5]
@@ -179,7 +179,7 @@ def test_rig_and_imu_agree(wurld_info, tmp_path):
     rigs = {"body": {"cameras": {
         "cam0": {"q_wxyz": [1.0, 0.0, 0.0, 0.0], "tr": [0.0, 0.0, 0.0]},
         "cam1": {"q_wxyz": [1.0, 0.0, 0.0, 0.0], "tr": [0.12, 0.0, 0.0]}}}}
-    p = _write(tmp_path / "rig.wl.webm", n=6, cameras=("cam0", "cam1"),
+    p = _write(tmp_path / "rig.wurld.webm", n=6, cameras=("cam0", "cam1"),
                imu=True, rigs=rigs)
     got, seq = assert_agrees(tool, p)
     assert set(got["imu"]) == {"imu0"}
@@ -192,7 +192,7 @@ def test_examples_agree(wurld_info, tmp_path):
     tool, _ = wurld_info
     for script, name in [("04_robot_rig_imu.py", "rig"), ("06_stereo_rig.py", "stereo"),
                          ("01_feedforward_reconstruction.py", "ff")]:
-        out = tmp_path / f"{name}.wl.webm"
+        out = tmp_path / f"{name}.wurld.webm"
         r = subprocess.run([sys.executable, str(ROOT / "examples" / script), str(out)],
                            capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
@@ -201,7 +201,7 @@ def test_examples_agree(wurld_info, tmp_path):
 
 def test_cluster_start_points_at_the_pixels(wurld_info, tmp_path):
     tool, _ = wurld_info
-    p = _write(tmp_path / "clusters.wl.webm", n=6)
+    p = _write(tmp_path / "clusters.wurld.webm", n=6)
     got = read_cpp(tool, p)
     start = got["cluster_start"]
     assert 0 < start < p.stat().st_size
@@ -213,7 +213,7 @@ def test_cluster_start_points_at_the_pixels(wurld_info, tmp_path):
 
 def test_reader_rejects_non_wurld_and_garbage(wurld_info, tmp_path):
     tool, _ = wurld_info
-    bad = tmp_path / "bad.wl.webm"
+    bad = tmp_path / "bad.wurld.webm"
     bad.write_bytes(b"\x1a\x45\xdf\xa3 not really matroska")
     r = subprocess.run([str(tool), str(bad), "--json"], capture_output=True, text=True)
     assert r.returncode == 1
@@ -228,10 +228,10 @@ def test_reader_rejects_non_wurld_and_garbage(wurld_info, tmp_path):
 def test_truncated_file_does_not_crash_or_invent_data(wurld_info, tmp_path):
     """Half a file must fail cleanly, not produce plausible-looking poses."""
     tool, _ = wurld_info
-    p = _write(tmp_path / "whole.wl.webm", n=8)
+    p = _write(tmp_path / "whole.wurld.webm", n=8)
     data = p.read_bytes()
     for frac in (0.05, 0.25, 0.5, 0.75):
-        cut = tmp_path / f"cut_{int(frac*100)}.wl.webm"
+        cut = tmp_path / f"cut_{int(frac*100)}.wurld.webm"
         cut.write_bytes(data[: int(len(data) * frac)])
         r = subprocess.run([str(tool), str(cut), "--json"], capture_output=True, text=True)
         # Either it reads the metadata (which lives early in the file) or it

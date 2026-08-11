@@ -256,7 +256,7 @@ def build(out_dir: Path) -> dict:
     index = {"format": "wurld-conformance", "version": 1, "vectors": []}
     for fn in VECTOR_FNS:
         name = fn.__name__
-        path = out_dir / f"{name}.wl.webm"
+        path = out_dir / f"{name}.wurld.webm"
         expected = fn(path)
         (out_dir / f"{name}.expected.json").write_text(
             json.dumps(expected, indent=2, sort_keys=True) + "\n")

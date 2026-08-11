@@ -17,7 +17,7 @@ wurld's answer (SPEC §8, §11):
   - One file is one rig on one clock. Two robots means two files; see §11 and
     the "misfits" section of USE_CASES.md.
 
-Run:  python examples/04_robot_rig_imu.py out.wl.webm
+Run:  python examples/04_robot_rig_imu.py out.wurld.webm
 """
 
 import sys
@@ -113,4 +113,4 @@ def main(out_path):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "rig.wl.webm"))
+    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "rig.wurld.webm"))

@@ -37,7 +37,7 @@ def _on_alarm(_sig, _frame):
 @pytest.fixture(scope="module")
 def seed_bytes(tmp_path_factory):
     """A real file to mutate — random bytes alone rarely reach the deeper parsers."""
-    path = tmp_path_factory.mktemp("fuzz") / "seed.wl.webm"
+    path = tmp_path_factory.mktemp("fuzz") / "seed.wurld.webm"
     H, W, N = 32, 40, 8
     cams = {"0": wl.Camera(model="PINHOLE", width=W, height=H,
                            params=[30.0, 30.0, W / 2, H / 2])}
@@ -134,7 +134,7 @@ def test_validator_reports_rather_than_raises(tmp_path, seed_bytes):
     doc["frames_binary"] = {"version": 1, "count": 1, "cameras": ["0"]}
     tags["WURLD"] = json.dumps(doc, separators=(",", ":"))
     tags["WURLD_FRAMES"] = container._FRAME_RECORD.pack(0, 7, 0.0, 1, 0, 0, 0, 0, 0, 0, 1)
-    p = tmp_path / "badcam.wl.webm"
+    p = tmp_path / "badcam.wurld.webm"
     p.write_bytes(ebml.insert_header_tags(seed_bytes, tags))
 
     findings = v.validate(p)          # must not raise
@@ -144,7 +144,7 @@ def test_validator_reports_rather_than_raises(tmp_path, seed_bytes):
 def test_validator_survives_mutated_files(tmp_path, seed_bytes):
     rng = random.Random(99)
     prev = signal.signal(signal.SIGALRM, _on_alarm)
-    p = tmp_path / "case.wl.webm"
+    p = tmp_path / "case.wurld.webm"
     try:
         for _ in range(120):
             p.write_bytes(_mutate(rng, seed_bytes))

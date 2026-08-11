@@ -12,7 +12,14 @@ targets:
       path: Sources/Info.plist
       properties:
         UILaunchScreen: {}
-        NSCameraUsageDescription: WurldCam records posed RGBD captures with the camera and LiDAR.
+        # Guideline 5.1.1 wants the reason and an example of the use, not just a
+        # restatement of the permission. Keep this identical to Sources/Info.plist.
+        NSCameraUsageDescription: >-
+          WurldCam uses the camera and LiDAR scanner to record a 3D capture. Each
+          frame's colour image, per-pixel depth and camera position are written to
+          a file on this device — for example, walking around a chair records a
+          short clip you can open on a computer and view in 3D. Recordings stay on
+          this device and are never uploaded.
         UIRequiredDeviceCapabilities: [arkit]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         CFBundleDisplayName: WurldCam

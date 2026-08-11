@@ -11,7 +11,7 @@ that, so wurld emits it. The point is that one file carries everything the
 trainer needs, and the depth it emits is the *same* depth the capture recorded,
 bit-exact, in metres, with the invalid pixels still marked.
 
-Run:  python examples/02_gaussian_splatting.py scene.wl.webm outdir/
+Run:  python examples/02_gaussian_splatting.py scene.wurld.webm outdir/
 """
 
 import json

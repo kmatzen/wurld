@@ -36,7 +36,7 @@ def long_file(tmp_path_factory):
     depth = np.stack([(1.5 + 0.4 * np.sin(xx / 7 + i * 0.1)).astype(np.float32)
                       for i in range(N)])
     f = 1.1 * W
-    out = tmp_path_factory.mktemp("stream") / "long.wl.webm"
+    out = tmp_path_factory.mktemp("stream") / "long.wurld.webm"
     wl.write(out,
              cameras={"0": wl.Camera("PINHOLE", W, H, [f, f, W / 2, H / 2])},
              frames=[wl.Frame(i=i, t=i / FPS, camera="0", q_wxyz=(1.0, 0.0, 0.0, 0.0),
@@ -150,7 +150,7 @@ def test_collection_streaming_is_bounded_too(long_file, tmp_path):
     root = tmp_path / "corpus"
     root.mkdir()
     for k in range(2):
-        (root / f"m{k}.wl.webm").write_bytes(long_file.read_bytes())
+        (root / f"m{k}.wurld.webm").write_bytes(long_file.read_bytes())
     m, failures = col.build_manifest(root, relative_to=root)
     assert not failures
     c = col.Collection(m, root=root)
@@ -174,7 +174,7 @@ def test_metadata_only_iteration_does_not_read_pixels(long_file, tmp_path):
     root = tmp_path / "meta"
     root.mkdir()
     for k in range(3):
-        (root / f"m{k}.wl.webm").write_bytes(long_file.read_bytes())
+        (root / f"m{k}.wurld.webm").write_bytes(long_file.read_bytes())
     m, _ = col.build_manifest(root, relative_to=root)
     c = col.Collection(m, root=root)
 

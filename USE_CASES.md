@@ -176,8 +176,8 @@ Worked recipe — **EuRoC MAV**, the standard visual-inertial benchmark, and the
 one import that exercises stereo, rigs and IMU at once:
 
 ```
-wurld convert /path/to/V1_01_easy out.wl.webm      # both eyes
-wurld convert /path/to/V1_01_easy out.wl.webm --mono
+wurld convert /path/to/V1_01_easy out.wurld.webm      # both eyes
+wurld convert /path/to/V1_01_easy out.wurld.webm --mono
 ```
 
 We do not host converted EuRoC: it is CC BY-NC-SA 3.0, so this is a recipe you
@@ -435,7 +435,7 @@ it is inherent rather than a tuning problem.
 ## Part 4 — Playback reach, HDR, and what we plan to do about them
 
 Measured 2026-08-08 on macOS 15 (arm64), against
-`docs/samples/synthetic-orbit.wl.webm`. Re-run before trusting these; players
+`docs/samples/synthetic-orbit.wurld.webm`. Re-run before trusting these; players
 change.
 
 | player / stack | opens the file | renders the right track |

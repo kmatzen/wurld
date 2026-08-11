@@ -103,7 +103,7 @@ const haveVectors = existsSync(vector('index.json'));
 
 test('readDocument resolves a binary pose table', { skip: !haveVectors && 'no vectors' },
   () => {
-    const bytes = new Uint8Array(readFileSync(vector('v03_binary_frames.wl.webm')));
+    const bytes = new Uint8Array(readFileSync(vector('v03_binary_frames.wurld.webm')));
     const { doc } = readDocument(bytes);
     const want = JSON.parse(readFileSync(vector('v03_binary_frames.expected.json')));
     assert.equal(doc.frames.length, want.frames.length);
@@ -119,7 +119,7 @@ test('resolvePoses works from tags a caller already holds',
     // This is exactly how the viewer uses it: tags first (possibly from ranged
     // reads), poses resolved after. Keeping the viewer on this path is why the
     // chain lives in the library instead of in the page.
-    const bytes = new Uint8Array(readFileSync(vector('v03_binary_frames.wl.webm')));
+    const bytes = new Uint8Array(readFileSync(vector('v03_binary_frames.wurld.webm')));
     const tags = readWurldTags(bytes);
     const doc = JSON.parse(tags.WURLD);
     assert.ok(!doc.frames || doc.frames.length === 0, 'fixture should store poses in binary');
@@ -129,7 +129,7 @@ test('resolvePoses works from tags a caller already holds',
   });
 
 test('unposed frames survive as unposed', { skip: !haveVectors && 'no vectors' }, () => {
-  const bytes = new Uint8Array(readFileSync(vector('v04_unposed.wl.webm')));
+  const bytes = new Uint8Array(readFileSync(vector('v04_unposed.wurld.webm')));
   const { doc } = readDocument(bytes);
   const lost = doc.frames.filter(f => f.pose_valid === false).map(f => f.i);
   assert.deepEqual(lost, [1, 4]);
@@ -141,7 +141,7 @@ test('unposed frames survive as unposed', { skip: !haveVectors && 'no vectors' }
 
 test('IMU streams unpack from the document declaration',
   { skip: !haveVectors && 'no vectors' }, () => {
-    const bytes = new Uint8Array(readFileSync(vector('v06_rig_imu.wl.webm')));
+    const bytes = new Uint8Array(readFileSync(vector('v06_rig_imu.wurld.webm')));
     const { doc, imu, tags } = readDocument(bytes);
     assert.deepEqual(Object.keys(imu), ['imu0']);
     assert.ok(imu.imu0.length > doc.frames.length);
@@ -168,7 +168,7 @@ test("the README's JavaScript quickstart runs on every file shape",
     //   unpackFrames(tags.WURLD_FRAMES ?? tags.WURLD_POSES, keys)
     // which throws on a file whose poses are in the JSON array — most files.
     for (const name of ['v01_minimal', 'v03_binary_frames', 'v06_rig_imu']) {
-      const bytes = new Uint8Array(readFileSync(vector(`${name}.wl.webm`)));
+      const bytes = new Uint8Array(readFileSync(vector(`${name}.wurld.webm`)));
       const { doc, imu, rgbStreams } = readDocument(bytes);
       assert.ok(doc.frames.length > 0, `${name}: no poses resolved`);
       assert.ok(typeof doc.frames[0].t === 'number');

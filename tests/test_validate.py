@@ -23,7 +23,7 @@ def _findings(doc_mutation=None, tag_mutation=None, base=None, tmp_path=None):
     tags["WURLD"] = json.dumps(doc, separators=(",", ":"))
     if tag_mutation:
         tag_mutation(tags)
-    out = tmp_path / "mutated.wl.webm"
+    out = tmp_path / "mutated.wurld.webm"
     out.write_bytes(ebml.insert_header_tags(data, tags))
     return v.validate(out)
 
@@ -36,7 +36,7 @@ def _has(findings, severity, section, needle):
 @pytest.fixture(scope="module")
 def good(tmp_path_factory):
     """A small, valid file: the baseline every mutation starts from."""
-    path = tmp_path_factory.mktemp("val") / "good.wl.webm"
+    path = tmp_path_factory.mktemp("val") / "good.wurld.webm"
     H, W, N = 32, 40, 6
     cams = {"0": wl.Camera(model="PINHOLE", width=W, height=H, params=[30.0, 30.0, W / 2, H / 2])}
     frames = [wl.Frame(i=i, t=i / 30, camera="0", q_wxyz=(1.0, 0.0, 0.0, 0.0), tr=(0.01 * i, 0.0, 0.5))
@@ -193,7 +193,7 @@ def test_a_plain_chromapakz_file_is_not_an_error(tmp_path):
 
 
 def test_garbage_is_reported_not_raised(tmp_path):
-    p = tmp_path / "garbage.wl.webm"
+    p = tmp_path / "garbage.wurld.webm"
     p.write_bytes(b"this is not a matroska file at all")
     f = v.validate(p)
     assert any(x.severity == v.ERROR for x in f)
@@ -202,7 +202,7 @@ def test_garbage_is_reported_not_raised(tmp_path):
 def test_real_shipped_samples_conform():
     """The files we publish must pass our own checker."""
     from pathlib import Path
-    sample = Path("docs/samples/synthetic-orbit.wl.webm")
+    sample = Path("docs/samples/synthetic-orbit.wurld.webm")
     if not sample.exists():
         pytest.skip("sample not present")
     assert v.validate(sample) == []
@@ -219,7 +219,7 @@ def _stereo(tmp_path, cam_ids=("cam0", "cam1"), hdr=None, n=4):
     rng = np.random.default_rng(0)
     dt = np.uint16 if hdr else np.uint8
     hi = 1024 if hdr else 255
-    path = tmp_path / "streams.wl.webm"
+    path = tmp_path / "streams.wurld.webm"
     wl.write(path, cameras=cams, frames=frames,
              rgb={c: rng.integers(0, hi, (n, H, W, 4), dtype=dt) for c in cam_ids},
              signals={"depth": np.full((n, H, W), 3000, np.uint16)},
@@ -248,7 +248,7 @@ def test_a_stream_with_no_matching_camera_is_refused_at_write(tmp_path):
               for i in range(n)]
     rng = np.random.default_rng(0)
     with pytest.raises(ValueError, match="no matching camera"):
-        wl.write(tmp_path / "bad.wl.webm", cameras=cams, frames=frames,
+        wl.write(tmp_path / "bad.wurld.webm", cameras=cams, frames=frames,
                  rgb={"cam0": rng.integers(0, 255, (n, H, W, 4), np.uint8),
                       "ghost": rng.integers(0, 255, (n, H, W, 4), np.uint8)}, fps=30)
 
@@ -261,7 +261,7 @@ def test_streams_must_agree_on_frame_count(tmp_path):
               for i in range(3)]
     rng = np.random.default_rng(0)
     with pytest.raises(ValueError, match="disagree on frame count"):
-        wl.write(tmp_path / "bad.wl.webm", cameras=cams, frames=frames,
+        wl.write(tmp_path / "bad.wurld.webm", cameras=cams, frames=frames,
                  rgb={"cam0": rng.integers(0, 255, (3, H, W, 4), np.uint8),
                       "cam1": rng.integers(0, 255, (5, H, W, 4), np.uint8)}, fps=30)
 
@@ -284,7 +284,7 @@ def test_hdr_without_any_rgb_is_refused(tmp_path):
     frames = [wl.Frame(i=i, t=i / 30, camera="0", q_wxyz=(1.0, 0, 0, 0), tr=(0, 0, 0.5))
               for i in range(n)]
     with pytest.raises(ValueError, match="no RGB stream"):
-        wl.write(tmp_path / "bad.wl.webm", cameras=cams, frames=frames,
+        wl.write(tmp_path / "bad.wurld.webm", cameras=cams, frames=frames,
                  signals={"depth": np.full((n, H, W), 3000, np.uint16)},
                  specs={"depth": {"inverse_depth": True, "near": 0.3, "far": 9.0}},
                  hdr={"transfer": "pq"}, fps=30)
@@ -307,7 +307,7 @@ def test_older_format_versions_still_read_and_validate(good, tmp_path):
     doc = json.loads(tags["WURLD"])
     doc["version"] = "0.4"
     tags["WURLD"] = json.dumps(doc, separators=(",", ":"))
-    aged = tmp_path / "aged.wl.webm"
+    aged = tmp_path / "aged.wurld.webm"
     aged.write_bytes(ebml.insert_header_tags(data, tags))
 
     assert v.validate(aged) == []
@@ -349,10 +349,10 @@ def test_a_truncated_file_is_reported(tmp_path):
     formed, and a reader reports the full frame count. Only the pixels are
     missing.
     """
-    src = _multi_cluster(tmp_path / "full.wl.webm")
+    src = _multi_cluster(tmp_path / "full.wurld.webm")
     assert v.validate(src) == [], "the healthy fixture must be clean"
 
-    cut = _drop_clusters_after_the_first(src, tmp_path / "cut.wl.webm")
+    cut = _drop_clusters_after_the_first(src, tmp_path / "cut.wurld.webm")
     findings = v.validate(cut)
     assert _has(findings, "error", "9", "video are missing"), findings
     # The poses survive, which is exactly why this was invisible.
@@ -362,5 +362,5 @@ def test_a_truncated_file_is_reported(tmp_path):
 def test_a_healthy_file_is_not_accused_of_truncation(tmp_path):
     """A check that fires on intact files would be worse than none."""
     for n in (4, 40, 150):
-        src = _multi_cluster(tmp_path / f"ok{n}.wl.webm", n=n)
+        src = _multi_cluster(tmp_path / f"ok{n}.wurld.webm", n=n)
         assert not [f for f in v.validate(src) if "missing" in f.message], n

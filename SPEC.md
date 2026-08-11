@@ -46,18 +46,24 @@ Clusters (rewriting only the Segment size vint) also yields a valid file — ear
 writers did — but forfeits streamable metadata. Readers scan all top-level Tags
 elements regardless of position.
 
-Recommended file suffix: **`.wl.webm`** (plain `.webm` also valid).
+Recommended file suffix: **`.wurld.webm`** (plain `.webm` also valid).
 
 The trailing `.webm` is the load-bearing part and must not be dropped. Operating
 systems, players, browsers and CDNs key off the last suffix, so a wurld file
 identifies as `video/webm` everywhere and an ordinary player just plays it —
-which is the property the whole design is built on. A distinct suffix such as
-`.wurld` would forfeit it. The leading `.wl` only marks the file as carrying this
-metadata; the same shape as OME-TIFF's `.ome.tiff`, and for the same reason.
+which is the property the whole design is built on. A bare `.wurld` would
+forfeit it. The leading `.wurld` only marks the file as carrying this metadata;
+the same shape as OME-TIFF's `.ome.tiff`, and for the same reason — spelling the
+format's own name in full, as OME-TIFF does.
 
-Tools MUST NOT assume the `.wl` part is present: it is a recommendation, not a
+Tools MUST NOT assume the `.wurld` part is present: it is a recommendation, not a
 requirement, and a reader identifies a wurld file by its `WURLD` tag rather than
 by its name.
+
+Earlier revisions recommended `.wl.webm`, from the format's former name. That
+spelling remains valid and readers MUST continue to accept it — nothing in this
+specification has ever keyed off the name — but new writers SHOULD use
+`.wurld.webm`.
 
 ## 3. Canonical conventions (fixed in 1.0)
 
@@ -480,7 +486,7 @@ comparable across files.
   "description": "",
   "totals": { "members": 2, "frames": 71, "posed_frames": 67 },
   "members": [
-    { "uri": "captures/take00.wl.webm", "frames": 12, "posed_frames": 11,
+    { "uri": "captures/take00.wurld.webm", "frames": 12, "posed_frames": 11,
       "cameras": ["0"], "rgb_streams": ["rgb"], "signals": ["depth"],
       "metric_scale": true, "t_start": 0.0, "t_end": 0.367,
       "width": 64, "height": 48, "bytes": 25462, "sha256": null }

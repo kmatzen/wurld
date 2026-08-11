@@ -181,18 +181,18 @@ def cpp_tool(tmp_path_factory):
 
 @pytest.mark.parametrize("name", vector_names())
 def test_python_reader_conforms(name):
-    check("python", run_python(VECTORS / f"{name}.wl.webm"), expected_for(name))
+    check("python", run_python(VECTORS / f"{name}.wurld.webm"), expected_for(name))
 
 
 @pytest.mark.parametrize("name", vector_names())
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_js_reader_conforms(name):
-    check("javascript", run_js(VECTORS / f"{name}.wl.webm"), expected_for(name))
+    check("javascript", run_js(VECTORS / f"{name}.wurld.webm"), expected_for(name))
 
 
 @pytest.mark.parametrize("name", vector_names())
 def test_cpp_reader_conforms(cpp_tool, name):
-    check("c++", run_cpp(cpp_tool, VECTORS / f"{name}.wl.webm"), expected_for(name))
+    check("c++", run_cpp(cpp_tool, VECTORS / f"{name}.wurld.webm"), expected_for(name))
 
 
 def test_corpus_is_up_to_date():
@@ -214,7 +214,7 @@ def test_corpus_covers_the_paths_that_matter():
         assert required in names, f"{required} is missing from the corpus"
     # Every vector must have both a file and an expectation.
     for name in names:
-        assert (VECTORS / f"{name}.wl.webm").exists()
+        assert (VECTORS / f"{name}.wurld.webm").exists()
         assert (VECTORS / f"{name}.expected.json").exists()
 
 
@@ -228,7 +228,7 @@ def test_readers_agree_with_each_other_directly(cpp_tool):
     if shutil.which("node") is None:
         pytest.skip("node is not installed")
     for name in vector_names():
-        path = VECTORS / f"{name}.wl.webm"
+        path = VECTORS / f"{name}.wurld.webm"
         py, js, cpp = run_python(path), run_js(path), run_cpp(cpp_tool, path)
         for field in sorted(CORE_FIELDS):
             assert not approx_equal(js[field], py[field], field), \

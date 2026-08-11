@@ -56,7 +56,7 @@ def polycam_fixture(scene, tmp_path):
 
 def test_polycam_import(polycam_fixture, scene, tmp_path):
     assert detect(polycam_fixture) == "polycam"
-    out = tmp_path / "pc.wl.webm"
+    out = tmp_path / "pc.wurld.webm"
     polycam.from_polycam(polycam_fixture, out)
     seq = wl.read(out)
 
@@ -82,7 +82,7 @@ def test_polycam_import(polycam_fixture, scene, tmp_path):
 
 
 def test_polycam_original_cameras_opt_out(polycam_fixture, scene, tmp_path):
-    out = tmp_path / "orig.wl.webm"
+    out = tmp_path / "orig.wurld.webm"
     polycam.from_polycam(polycam_fixture, out, corrected=False)
     seq = wl.read(out)
     # poisoned original poses: +100 on the x translation, in ARKit axes
@@ -90,7 +90,7 @@ def test_polycam_original_cameras_opt_out(polycam_fixture, scene, tmp_path):
 
 
 def test_polycam_at_rgb(polycam_fixture, scene, tmp_path):
-    out = tmp_path / "rgb.wl.webm"
+    out = tmp_path / "rgb.wurld.webm"
     polycam.from_polycam(polycam_fixture, out, at="rgb")
     seq = wl.read(out)
     H, W = scene["rgb"].shape[1:3]

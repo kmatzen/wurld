@@ -3,7 +3,7 @@
 Usage (nerfstudio installed):
 
     from wurld.integrations.nerfstudio_parser import WurldDataParserConfig
-    config = WurldDataParserConfig(data=Path("scene.wl.webm"))
+    config = WurldDataParserConfig(data=Path("scene.wurld.webm"))
     outputs = config.setup()._generate_dataparser_outputs()
 
 or register it as a plugin via the ``nerfstudio.dataparser_configs`` entry point.
@@ -73,10 +73,10 @@ def _extract_cache(seq: container.Sequence, cache: Path) -> tuple[list[Path], li
 
 @dataclass
 class WurldDataParserConfig(DataParserConfig):
-    """Parse a wurld .wl.webm as a nerfstudio dataset."""
+    """Parse a wurld .wurld.webm as a nerfstudio dataset."""
 
     _target: Type = field(default_factory=lambda: WurldDataParser)
-    data: Path = Path("scene.wl.webm")
+    data: Path = Path("scene.wurld.webm")
     scale_factor: float = 1.0
     """Scene scale applied to camera translations."""
 

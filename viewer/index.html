@@ -66,7 +66,7 @@
 </div>
 <div id="drop">
   <div class="big">wurld viewer</div>
-  <div class="small">Drop a <b>.wl.webm</b> file, or</div>
+  <div class="small">Drop a <b>.wurld.webm</b> file, or</div>
   <button id="pick">Choose file</button>
   <input id="file" type="file" accept=".webm" hidden>
 </div>
@@ -136,8 +136,51 @@ function depthToMeters(u16, out) {
 }
 
 // ---------- loading ----------
+
+// The <video> element's previous blob URL has to be released explicitly, or
+// every file opened in a session pins its own copy of the bytes for the life
+// of the page. Remote sources are plain URLs and must not be revoked.
+let lastObjectURL = null;
+function setVideoSource(url, revocable) {
+  const vid = document.getElementById('vid');
+  if (lastObjectURL) URL.revokeObjectURL(lastObjectURL);
+  lastObjectURL = revocable ? url : null;
+  vid.src = url;
+  vid.play().catch(() => {});
+}
+
+// Opening a second file must not leave any of the first one on screen. Most of
+// applyMetadata reassigns unconditionally and is safe, but three things are not,
+// and each one shows up as the new file rendered through the old file's state:
+//
+//   * camera/depthMap are assigned only inside `if (doc)` below, so dropping a
+//     plain .webm after a wurld file would reproject its depth through the
+//     previous file's intrinsics and value_map — a plausible-looking, wrong
+//     point cloud rather than an obvious failure.
+//   * lazyState.active stays set after a ranged remote load, so setFrame would
+//     keep issuing ranged reads against the *old* src to fill gaps in the new
+//     file's frame array.
+//   * cur survives, so opening a shorter file leaves the scrubber past the end
+//     ("frame 401/100") with nothing drawn.
+function forgetPreviousFile() {
+  state.cur = 0;
+  state.camera = null;
+  state.depthMap = null;
+  lazyState.active = false;
+  lazyState.loading?.clear();
+  const scrub = document.getElementById('scrub');
+  scrub.value = 0; scrub.max = 0;
+  // Blank the panes and the counter now rather than waiting for the new file's
+  // first frame, so no part of the previous file survives the moment of the
+  // swap — including when the new file turns out not to load at all.
+  document.getElementById('frameinfo').textContent = '';
+  clearPane(document.getElementById('rgbPane'));
+  clearPane(document.getElementById('depthPane'));
+}
+
 function applyMetadata(tags, headline) {
   document.getElementById('drop').classList.add('hidden');
+  forgetPreviousFile();
   const docStr = tags.WURLD;
   const doc = typeof docStr === 'string' ? JSON.parse(docStr) : null;
   // Pose precedence (SPEC §9) lives in wurld.js so this page and the published
@@ -183,6 +226,10 @@ function applyMetadata(tags, headline) {
     state.orbit.target = c; state.orbit.dist = span * 2.5;
   }
   state.fitted = false; state.userMoved = false;
+  // The clock still holds an offset into the previous file's timeline; without
+  // this a load during playback runs against the old timestamps until it
+  // happens to overrun the end and reset itself.
+  if (state.playing) resyncClock(performance.now());
   showMeta(headline);
   refreshExports();
   return doc;
@@ -316,14 +363,32 @@ function ingestFrame(frame) {
   else if (!state.playing) setFrame(state.cur);  // refresh the frame counter label
 }
 
+/** A load that fails must not leave the previous file on screen pretending to be
+ *  the new one. Report it, and leave the viewer empty. */
+function reportLoadFailure(name, err) {
+  console.error('load', name, err);
+  state.doc = null; state.tags = null;
+  state.frames = []; state.poses = new Map(); state.cloudCache = new Map();
+  forgetPreviousFile();
+  document.getElementById('meta').textContent =
+    `could not read ${name} — ${err && err.message ? err.message : err}`;
+  refreshExports();
+}
+
 async function loadBytes(bytes, name) {
+  try {
+    await decodeInto(bytes, name);
+  } catch (err) {
+    reportLoadFailure(name, err);
+  }
+}
+
+async function decodeInto(bytes, name) {
   applyMetadata(readWurldTags(bytes), `file: ${name}  (${(bytes.length / 1e6).toFixed(2)} MB)`);
   const dec = createDecoder(bytes);
   state.W = dec.width; state.H = dec.height;
   for await (const frame of dec) ingestFrame(frame);
-  const vid = document.getElementById('vid');
-  vid.src = URL.createObjectURL(new Blob([bytes], { type: 'video/webm' }));
-  vid.play().catch(() => {});
+  setVideoSource(URL.createObjectURL(new Blob([bytes], { type: 'video/webm' })), true);
   showMeta(`file: ${name}  (${(bytes.length / 1e6).toFixed(2)} MB)`);
   setFrame(state.cur);
 }
@@ -561,6 +626,11 @@ function draw() {
 requestAnimationFrame(draw);
 
 // ---------- 2D panes ----------
+/** Blank a 2D pane. A pane with nothing to show must show nothing. */
+function clearPane(cv) {
+  cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+}
+
 function drawPanes(i) {
   const f = state.frames[i]; if (!f) return;
   const { W, H } = state;
@@ -569,6 +639,12 @@ function drawPanes(i) {
   if (paneRgb) {
     rp.width = W; rp.height = H;
     rp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(paneRgb), W, H), 0, 0);
+  } else {
+    // Each branch below used to be write-only, which meant a pane kept whatever
+    // was last drawn into it: open a file with no depth after one with depth and
+    // the depth pane still showed the previous file's. The same applies within a
+    // file, where a frame missing a modality would inherit its predecessor's.
+    clearPane(rp);
   }
   if (f.depth) {
     dp.width = W; dp.height = H;
@@ -587,6 +663,8 @@ function drawPanes(i) {
       d[k*4+3] = 255;
     }
     dp.getContext('2d').putImageData(img, 0, 0);
+  } else {
+    clearPane(dp);
   }
 }
 
@@ -610,8 +688,7 @@ async function setupLazy(src, headerBytes, bounds, seeks, chroma, firstCluster) 
   state.W = chroma.width; state.H = chroma.height;
   state.frames = new Array(n).fill(null);
   document.getElementById('scrub').max = n - 1;
-  const vid = document.getElementById('vid');
-  vid.src = src; vid.play().catch(() => {});
+  setVideoSource(src, false);
   setFrame(0);
 }
 
@@ -753,6 +830,9 @@ document.getElementById('pick').onclick = () => fileInput.click();
 document.getElementById('open').onclick = () => fileInput.click();
 fileInput.onchange = async () => {
   const f = fileInput.files[0];
+  // Clearing the input means picking the same path twice still fires a change
+  // event — the obvious move after re-exporting a file you are iterating on.
+  fileInput.value = '';
   if (f) loadBytes(new Uint8Array(await f.arrayBuffer()), f.name);
 };
 addEventListener('dragover', e => e.preventDefault());
@@ -765,7 +845,7 @@ addEventListener('drop', async e => {
 // ?src= auto-load (relative to this page): ranged/progressive when the server
 // supports it and the file has a SeekHead; full download otherwise.
 const src = new URLSearchParams(location.search).get('src');
-if (src) loadRemote(src).catch(e => console.error('load', e));
+if (src) loadRemote(src).catch(e => reportLoadFailure(src, e));
 </script>
 </body>
 </html>

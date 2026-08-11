@@ -12,7 +12,7 @@
 //   doc.cameras["0"] = {"PINHOLE", 640, 480, {525, 525, 320, 240}};
 //   doc.frames.push_back({0, 0.0, "0", true, {1,0,0,0}, {0,0,0}});
 //   doc.world_json = R"({"metric_scale":true})";
-//   wurld::write_file("in.webm", "out.wl.webm", doc);
+//   wurld::write_file("in.webm", "out.wurld.webm", doc);
 //
 // The bytes it emits are checked against the Python writer for equality, not
 // merely for readability: `pack_frames` and `pack_imu` must produce identical

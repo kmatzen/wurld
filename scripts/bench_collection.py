@@ -46,7 +46,7 @@ def build_corpus(root: Path, members: int, frames: int, w: int, h: int) -> Path:
     if marker.exists() and json.loads(marker.read_text()) == want:
         return root
 
-    for p in root.glob("*.wl.webm"):
+    for p in root.glob("*.wurld.webm"):
         p.unlink()
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     for k in range(members):
@@ -58,7 +58,7 @@ def build_corpus(root: Path, members: int, frames: int, w: int, h: int) -> Path:
                           for i in range(frames)])
         f = 1.1 * w
         wl.write(
-            root / f"take{k:06d}.wl.webm",
+            root / f"take{k:06d}.wurld.webm",
             cameras={"0": wl.Camera("PINHOLE", w, h, [f, f, w / 2, h / 2])},
             frames=[wl.Frame(i=i, t=i / 30, camera="0", q_wxyz=(1.0, 0.0, 0.0, 0.0),
                              tr=(0.01 * i, 0.0, 0.5)) for i in range(frames)],
@@ -175,7 +175,7 @@ def main() -> int:
           f"@ {args.width}x{args.height} -> {root}")
     t0 = time.perf_counter()
     build_corpus(root, args.members, args.frames, args.width, args.height)
-    on_disk = sum(p.stat().st_size for p in root.glob("*.wl.webm"))
+    on_disk = sum(p.stat().st_size for p in root.glob("*.wurld.webm"))
     print(f"  built in {time.perf_counter() - t0:.1f}s, {on_disk / 1024 / 1024:.1f} MiB "
           f"on disk\n")
 

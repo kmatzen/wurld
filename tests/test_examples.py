@@ -25,7 +25,7 @@ def _run(script, *args):
 
 
 def test_feedforward_reconstruction(tmp_path):
-    out = tmp_path / "ff.wl.webm"
+    out = tmp_path / "ff.wurld.webm"
     stdout = _run("01_feedforward_reconstruction.py", out)
     assert v.validate(out) == []
 
@@ -39,7 +39,7 @@ def test_feedforward_reconstruction(tmp_path):
 
 
 def test_gaussian_splatting_export(tmp_path):
-    src = Path("docs/samples/synthetic-orbit.wl.webm")
+    src = Path("docs/samples/synthetic-orbit.wurld.webm")
     if not src.exists():
         pytest.skip("hosted sample not present")
     outdir = tmp_path / "gs"
@@ -52,7 +52,7 @@ def test_gaussian_splatting_export(tmp_path):
 
 
 def test_slam_trajectory_export(tmp_path):
-    src = Path("docs/samples/synthetic-orbit.wl.webm")
+    src = Path("docs/samples/synthetic-orbit.wurld.webm")
     if not src.exists():
         pytest.skip("hosted sample not present")
     outdir = tmp_path / "slam"
@@ -66,7 +66,7 @@ def test_slam_trajectory_export(tmp_path):
 
 
 def test_stereo_rig(tmp_path):
-    out = tmp_path / "stereo.wl.webm"
+    out = tmp_path / "stereo.wurld.webm"
     stdout = _run("06_stereo_rig.py", out)
     assert v.validate(out) == []
 
@@ -98,7 +98,7 @@ def test_collection_training(tmp_path):
 
 
 def test_hdr_exr_render(tmp_path):
-    out = tmp_path / "hdr.wl.webm"
+    out = tmp_path / "hdr.wurld.webm"
     stdout = _run("05_hdr_exr_render.py", out)
     assert v.validate(out) == []
 
@@ -125,7 +125,7 @@ def test_float16_bits_carries_the_float_edge_cases():
 
 
 def test_robot_rig_and_imu(tmp_path):
-    out = tmp_path / "rig.wl.webm"
+    out = tmp_path / "rig.wurld.webm"
     _run("04_robot_rig_imu.py", out)
     assert v.validate(out) == []
 
@@ -155,7 +155,7 @@ def test_feedforward_output_can_reach_every_exporter(tmp_path, caplog):
     """
     import logging
 
-    src = tmp_path / "ff.wl.webm"
+    src = tmp_path / "ff.wurld.webm"
     _run("01_feedforward_reconstruction.py", src)
     seq = wl.read(src)
     unposed = sum(1 for f in seq.frames if not f.pose_valid)
@@ -175,7 +175,7 @@ def test_feedforward_output_can_reach_every_exporter(tmp_path, caplog):
 
 def test_a_signals_only_file_is_refused_with_a_reason(tmp_path):
     """rgb=None is legal (scene-referred HDR); 'NoneType is not subscriptable' is not."""
-    src = tmp_path / "norgb.wl.webm"
+    src = tmp_path / "norgb.wurld.webm"
     _run("05_hdr_exr_render.py", src)
     assert wl.read(src).rgb is None
 

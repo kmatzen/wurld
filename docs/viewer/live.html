@@ -42,7 +42,7 @@
 </div>
 
 <script type="module">
-import { createDecoder, createEncoder } from 'https://cdn.jsdelivr.net/npm/chromapakz@0.8.0/src/chromapakz.js';
+import { createDecoder, createEncoder } from 'https://cdn.jsdelivr.net/npm/chromapakz@0.9.1/src/chromapakz.js';
 import { WurldRecorder, WurldLivePlayer, readWurldTags, unpackFrames, cat }
   from './wurld.js';
 
@@ -317,7 +317,7 @@ document.getElementById('start').onclick = async () => {
     `file size        ${(file.length/1024).toFixed(1)} KB\n` +
     `poses in table   ${frames.length}\n` +
     `buffered decode  ${bufOk ? '✓' : '✗'} ${bufFrames} frames\n` +
-    `<a download="live.wl.webm" href="${URL.createObjectURL(blob)}">download live.wl.webm</a>`;
+    `<a download="live.wurld.webm" href="${URL.createObjectURL(blob)}">download live.wurld.webm</a>`;
 };
 
 document.getElementById('stop').onclick = () => {

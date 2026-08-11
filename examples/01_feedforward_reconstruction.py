@@ -15,7 +15,7 @@ honestly rather than flattening it into "poses". wurld can:
   - `world.metric_scale=False`, because a monocular feed-forward model recovers
     geometry only up to scale — a consumer that needs metres must know that.
 
-Run:  python examples/01_feedforward_reconstruction.py out.wl.webm
+Run:  python examples/01_feedforward_reconstruction.py out.wurld.webm
 """
 
 import sys
@@ -114,4 +114,4 @@ def main(out_path):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "feedforward.wl.webm"))
+    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "feedforward.wurld.webm"))

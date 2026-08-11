@@ -67,7 +67,7 @@ def corpus(tmp_path_factory):
     paths = []
     for i, n in enumerate(COUNTS):
         d = root / "sub" if i % 2 else root
-        paths.append(_write_seq(d / f"seq{i}.wl.webm", n,
+        paths.append(_write_seq(d / f"seq{i}.wurld.webm", n,
                                 unposed=(1,) if i == 3 else ()))
     return root, paths
 
@@ -121,8 +121,8 @@ def test_header_read_does_not_scale_with_video_size(tmp_path):
     """
     from wurld import remote
 
-    small = _write_seq(tmp_path / "small.wl.webm", 10, w=32, h=24)
-    big = _write_seq(tmp_path / "big.wl.webm", 10, w=320, h=240)
+    small = _write_seq(tmp_path / "small.wurld.webm", 10, w=32, h=24)
+    big = _write_seq(tmp_path / "big.wurld.webm", 10, w=320, h=240)
     assert big.stat().st_size > 20 * small.stat().st_size
 
     read_big = remote.fetch_header(remote.file_fetcher(big)).bytes_fetched
@@ -291,8 +291,8 @@ def test_shuffle_buffer_reorders_within_a_member_without_losing_frames(manifest,
 
 
 def test_build_manifest_reports_bad_members_instead_of_hiding_them(tmp_path):
-    good = _write_seq(tmp_path / "good.wl.webm", 3)
-    bad = tmp_path / "bad.wl.webm"
+    good = _write_seq(tmp_path / "good.wurld.webm", 3)
+    bad = tmp_path / "bad.wurld.webm"
     bad.write_bytes(b"\x1a\x45\xdf\xa3not a real file")
 
     with pytest.raises(Exception):
@@ -321,8 +321,8 @@ def test_cli_index_and_collection(corpus, tmp_path):
 
 
 def test_cli_index_exits_nonzero_on_a_bad_member(tmp_path):
-    _write_seq(tmp_path / "good.wl.webm", 2)
-    (tmp_path / "bad.wl.webm").write_bytes(b"nope")
+    _write_seq(tmp_path / "good.wurld.webm", 2)
+    (tmp_path / "bad.wurld.webm").write_bytes(b"nope")
     out = tmp_path / "c.json"
     r = subprocess.run([sys.executable, "-m", "wurld.cli", "index", str(tmp_path),
                         "-o", str(out), "--skip-errors"], capture_output=True, text=True)
@@ -333,8 +333,8 @@ def test_cli_index_exits_nonzero_on_a_bad_member(tmp_path):
 
 
 def test_mixed_metric_scale_is_flagged(tmp_path):
-    _write_seq(tmp_path / "a.wl.webm", 2, metric=True)
-    _write_seq(tmp_path / "b.wl.webm", 2, metric=False)
+    _write_seq(tmp_path / "a.wurld.webm", 2, metric=True)
+    _write_seq(tmp_path / "b.wurld.webm", 2, metric=False)
     out = tmp_path / "c.json"
     subprocess.run([sys.executable, "-m", "wurld.cli", "index", str(tmp_path),
                     "-o", str(out)], capture_output=True, text=True, check=True)
@@ -346,7 +346,7 @@ def test_mixed_metric_scale_is_flagged(tmp_path):
 
 def test_checksum_is_recorded_when_asked(tmp_path):
     import hashlib
-    p = _write_seq(tmp_path / "a.wl.webm", 2)
+    p = _write_seq(tmp_path / "a.wurld.webm", 2)
     m = col.describe(p, checksum=True)
     assert m.sha256 == hashlib.sha256(p.read_bytes()).hexdigest()
     assert col.describe(p).sha256 is None
@@ -361,15 +361,15 @@ def test_verify_passes_on_an_untouched_corpus(manifest):
 
 def test_verify_catches_a_member_whose_frame_count_changed(tmp_path):
     """The drift that silently shifts every global index after it."""
-    _write_seq(tmp_path / "a.wl.webm", 4)
-    _write_seq(tmp_path / "b.wl.webm", 5)
+    _write_seq(tmp_path / "a.wurld.webm", 4)
+    _write_seq(tmp_path / "b.wurld.webm", 5)
     m, _ = col.build_manifest(tmp_path, relative_to=tmp_path)
     c = col.Collection(m, root=tmp_path)
     assert len(c) == 9
     assert c.locate(6) == (1, 2)
 
     # Re-record the first member one frame shorter, as a re-export would.
-    _write_seq(tmp_path / "a.wl.webm", 3)
+    _write_seq(tmp_path / "a.wurld.webm", 3)
 
     drift = c.verify()
     kinds = {d.kind for d in drift}
@@ -381,23 +381,23 @@ def test_verify_catches_a_member_whose_frame_count_changed(tmp_path):
 
 
 def test_verify_catches_missing_and_unreadable_members(tmp_path):
-    _write_seq(tmp_path / "a.wl.webm", 3)
-    _write_seq(tmp_path / "b.wl.webm", 3)
+    _write_seq(tmp_path / "a.wurld.webm", 3)
+    _write_seq(tmp_path / "b.wurld.webm", 3)
     m, _ = col.build_manifest(tmp_path, relative_to=tmp_path)
     c = col.Collection(m, root=tmp_path)
 
-    (tmp_path / "a.wl.webm").unlink()
-    (tmp_path / "b.wl.webm").write_bytes(b"\x1a\x45\xdf\xa3 truncated")
+    (tmp_path / "a.wurld.webm").unlink()
+    (tmp_path / "b.wurld.webm").write_bytes(b"\x1a\x45\xdf\xa3 truncated")
 
     drift = {d.kind for d in c.verify()}
     assert drift == {"missing", "unreadable"}
 
 
 def test_verify_catches_a_resolution_change(tmp_path):
-    _write_seq(tmp_path / "a.wl.webm", 3, w=32, h=24)
+    _write_seq(tmp_path / "a.wurld.webm", 3, w=32, h=24)
     m, _ = col.build_manifest(tmp_path, relative_to=tmp_path)
     c = col.Collection(m, root=tmp_path)
-    _write_seq(tmp_path / "a.wl.webm", 3, w=64, h=48)
+    _write_seq(tmp_path / "a.wurld.webm", 3, w=64, h=48)
 
     drift = c.verify()
     assert any(d.kind == "resolution" for d in drift), drift
@@ -405,7 +405,7 @@ def test_verify_catches_a_resolution_change(tmp_path):
 
 def test_verify_checksum_catches_content_changes_the_header_hides(tmp_path):
     """Same frame count and size, different pixels: only a hash sees it."""
-    p = _write_seq(tmp_path / "a.wl.webm", 3)
+    p = _write_seq(tmp_path / "a.wurld.webm", 3)
     m, _ = col.build_manifest(tmp_path, relative_to=tmp_path, checksum=True)
     c = col.Collection(m, root=tmp_path)
     assert c.verify(checksum=True) == []
@@ -422,7 +422,7 @@ def test_verify_checksum_catches_content_changes_the_header_hides(tmp_path):
 
 
 def test_cli_collection_verify_exits_nonzero_on_drift(tmp_path):
-    _write_seq(tmp_path / "a.wl.webm", 4)
+    _write_seq(tmp_path / "a.wurld.webm", 4)
     out = tmp_path / "c.json"
     subprocess.run([sys.executable, "-m", "wurld.cli", "index", str(tmp_path),
                     "-o", str(out)], capture_output=True, text=True, check=True)
@@ -432,7 +432,7 @@ def test_cli_collection_verify_exits_nonzero_on_drift(tmp_path):
     assert ok.returncode == 0
     assert "verified" in ok.stdout
 
-    _write_seq(tmp_path / "a.wl.webm", 2)
+    _write_seq(tmp_path / "a.wurld.webm", 2)
     bad = subprocess.run([sys.executable, "-m", "wurld.cli", "collection", str(out),
                           "--verify"], capture_output=True, text=True)
     assert bad.returncode == 1
@@ -447,13 +447,13 @@ def test_streaming_a_stereo_member_yields_both_eyes(tmp_path):
     silent right up until a model trained on half the cameras.
     """
     import shutil
-    src = Path("conformance/vectors/v05_stereo.wl.webm")
+    src = Path("conformance/vectors/v05_stereo.wurld.webm")
     if not src.exists():
         pytest.skip("conformance vectors not generated")
 
     root = tmp_path / "stereo"
     root.mkdir()
-    shutil.copy(src, root / "a.wl.webm")
+    shutil.copy(src, root / "a.wurld.webm")
     m, failures = col.build_manifest(root, relative_to=root)
     assert not failures
     assert m.members[0].rgb_streams == ["cam0", "cam1"], "fixture must be stereo"
@@ -478,11 +478,11 @@ def test_a_heterogeneous_corpus_streams(tmp_path):
 
     root = tmp_path / "mixed"
     root.mkdir()
-    _write_seq(root / "mono.wl.webm", 4, w=32, h=24)
-    _write_seq(root / "bigger.wl.webm", 3, w=64, h=48)
-    stereo = Path("conformance/vectors/v05_stereo.wl.webm")
+    _write_seq(root / "mono.wurld.webm", 4, w=32, h=24)
+    _write_seq(root / "bigger.wurld.webm", 3, w=64, h=48)
+    stereo = Path("conformance/vectors/v05_stereo.wurld.webm")
     if stereo.exists():
-        shutil.copy(stereo, root / "stereo.wl.webm")
+        shutil.copy(stereo, root / "stereo.wurld.webm")
 
     m, failures = col.build_manifest(root, relative_to=root)
     assert not failures
@@ -500,8 +500,8 @@ def test_mixing_metric_and_unscaled_members_warns(tmp_path, caplog):
 
     root = tmp_path / "scales"
     root.mkdir()
-    _write_seq(root / "metric.wl.webm", 3, metric=True)
-    _write_seq(root / "unscaled.wl.webm", 3, metric=False)
+    _write_seq(root / "metric.wurld.webm", 3, metric=True)
+    _write_seq(root / "unscaled.wurld.webm", 3, metric=False)
     m, _ = col.build_manifest(root, relative_to=root)
 
     with caplog.at_level(logging.WARNING):
@@ -516,8 +516,8 @@ def test_a_uniform_collection_stays_quiet(tmp_path, caplog):
 
     root = tmp_path / "uniform"
     root.mkdir()
-    _write_seq(root / "a.wl.webm", 3, metric=True)
-    _write_seq(root / "b.wl.webm", 3, metric=True)
+    _write_seq(root / "a.wurld.webm", 3, metric=True)
+    _write_seq(root / "b.wurld.webm", 3, metric=True)
     m, _ = col.build_manifest(root, relative_to=root)
     with caplog.at_level(logging.WARNING):
         col.Collection(m, root=root)
@@ -525,18 +525,18 @@ def test_a_uniform_collection_stays_quiet(tmp_path, caplog):
 
 
 def test_indexing_finds_both_legal_suffixes(tmp_path):
-    """SPEC §2 allows plain `.webm`; globbing only `*.wl.webm` found none of them.
+    """SPEC §2 allows plain `.webm`; globbing only `*.wurld.webm` found none of them.
 
     A corpus named the other legal way indexed as nothing, silently.
     """
     root = tmp_path / "suffixes"
     root.mkdir()
-    _write_seq(root / "a.wl.webm", 3)
+    _write_seq(root / "a.wurld.webm", 3)
     _write_seq(root / "b.webm", 4)
 
     m, failures = col.build_manifest(root, relative_to=root)
     assert failures == []
-    assert sorted(x.uri for x in m.members) == ["a.wl.webm", "b.webm"]
+    assert sorted(x.uri for x in m.members) == ["a.wurld.webm", "b.webm"]
     assert m.total_frames == 7
 
 
@@ -550,12 +550,12 @@ def test_a_plain_webm_is_not_a_member_and_not_a_failure(tmp_path):
 
     root = tmp_path / "mixedbag"
     root.mkdir()
-    _write_seq(root / "capture.wl.webm", 3)
+    _write_seq(root / "capture.wurld.webm", 3)
     (root / "holiday.webm").write_bytes(
         cz.encode({}, rgb=np.zeros((3, 16, 16, 4), np.uint8), fps=30))
-    (root / "broken.wl.webm").write_bytes(b"\x1a\x45\xdf\xa3 WURLD but truncated")
+    (root / "broken.wurld.webm").write_bytes(b"\x1a\x45\xdf\xa3 WURLD but truncated")
 
     m, failures = col.build_manifest(root, relative_to=root, on_error="skip")
-    assert [x.uri for x in m.members] == ["capture.wl.webm"]
+    assert [x.uri for x in m.members] == ["capture.wurld.webm"]
     # The plain video is absent from both lists; the broken wurld file is reported.
-    assert [Path(f[0]).name for f in failures] == ["broken.wl.webm"]
+    assert [Path(f[0]).name for f in failures] == ["broken.wurld.webm"]

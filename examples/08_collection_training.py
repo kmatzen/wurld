@@ -86,7 +86,7 @@ def main(workdir=None):
     root = Path(workdir)
     (root / "captures").mkdir(parents=True, exist_ok=True)
 
-    paths = [write_capture(root / "captures" / f"take{i:02d}.wl.webm", n, i)
+    paths = [write_capture(root / "captures" / f"take{i:02d}.wurld.webm", n, i)
              for i, n in enumerate(LENGTHS)]
     on_disk = sum(p.stat().st_size for p in paths)
 

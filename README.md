@@ -38,22 +38,22 @@ Foxglove export, `wurld[dev]` for the test suite.
 # working from a checkout instead: pip install -e ".[dev]"
 
 # write a synthetic demo sequence (analytic RGBD + orbit poses)
-wurld demo demo.wl.webm
+wurld demo demo.wurld.webm
 
 # inspect
-wurld info demo.wl.webm
+wurld info demo.wurld.webm
 
 # convert real datasets (auto-detects TUM / transforms.json / COLMAP / Stray Scanner)
-wurld convert path/to/rgbd_dataset_freiburg1_desk desk.wl.webm
-wurld convert path/to/transforms.json scene.wl.webm
-wurld convert path/to/colmap_project scene.wl.webm --images path/to/images
-wurld convert path/to/stray_capture scan.wl.webm       # needs ffmpeg on PATH
+wurld convert path/to/rgbd_dataset_freiburg1_desk desk.wurld.webm
+wurld convert path/to/transforms.json scene.wurld.webm
+wurld convert path/to/colmap_project scene.wurld.webm --images path/to/images
+wurld convert path/to/stray_capture scan.wurld.webm       # needs ffmpeg on PATH
 
 # extract back out
-wurld extract demo.wl.webm out/ --format tum        # or transforms | colmap
+wurld extract demo.wurld.webm out/ --format tum        # or transforms | colmap
 
 # check a file against the spec (exit 1 on a MUST violation)
-wurld validate scene.wl.webm
+wurld validate scene.wurld.webm
 ```
 
 `validate` turns SPEC's normative requirements into executable checks, so anyone
@@ -68,7 +68,7 @@ Python API:
 ```python
 import wurld as wl
 
-seq = wl.read("demo.wl.webm")
+seq = wl.read("demo.wurld.webm")
 seq.rgb                  # (T, H, W, 4) uint8, lazily decoded
 seq.depth_meters(0)      # (H, W) float, NaN = invalid
 seq.c2w(0)               # 4x4 camera-to-world (RDF, meters)
@@ -112,8 +112,8 @@ is an optional peer dependency, so reading costs you no native install.
 ```sh
 npm install                      # fetches the chromapakz decoder for the demo
 python3 -m http.server 8000      # from the repo root
-# open http://localhost:8000/viewer/index.html  and drop a .wl.webm
-# (or .../viewer/index.html?src=../demo.wl.webm)
+# open http://localhost:8000/viewer/index.html  and drop a .wurld.webm
+# (or .../viewer/index.html?src=../demo.wurld.webm)
 ```
 
 Zero-install, WebCodecs-decoded: seekable playback with per-frame point-cloud
@@ -130,7 +130,7 @@ The metadata lives in standard Matroska tags, so standard tools read it.
 and (for batch-written files) every pose:
 
 ```sh
-ffprobe -v error -show_entries format_tags=WURLD -of default=nw=1:nk=1 scene.wl.webm
+ffprobe -v error -show_entries format_tags=WURLD -of default=nw=1:nk=1 scene.wurld.webm
 ```
 
 [EXTRACTING.md](EXTRACTING.md) is the cookbook: poses to CSV, intrinsics, RGB
@@ -162,8 +162,8 @@ and desktop viewing is VLC or IINA.
 Studio reads but no ROS node can.)
 
 ```bash
-wurld ros2 export scene.wl.webm ./bag          # mcap storage; --storage sqlite3 also
-wurld ros2 import ./bag out.wl.webm
+wurld ros2 export scene.wurld.webm ./bag          # mcap storage; --storage sqlite3 also
+wurld ros2 import ./bag out.wurld.webm
 ```
 
 ```
@@ -221,7 +221,7 @@ file. If you write a fourth reader, this is the definition of correct.
 
 ```cpp
 #include "wurld.hpp"
-auto doc = wurld::read("scene.wl.webm");
+auto doc = wurld::read("scene.wurld.webm");
 for (const auto& f : doc.frames)
     if (f.pose_valid) use(f.c2w());          // row-major 4x4, camera-to-world
 ```
@@ -239,7 +239,7 @@ implementation that only agrees with itself is not a second implementation.
 
 ```bash
 cmake -S cpp -B cpp/build && cmake --build cpp/build
-./cpp/build/wurld_info scene.wl.webm
+./cpp/build/wurld_info scene.wurld.webm
 ```
 
 ### Writing from C++
@@ -255,7 +255,7 @@ wurld::WriteDoc doc;
 doc.cameras["0"] = {"PINHOLE", 640, 480, {525, 525, 320, 240}};
 doc.frames.push_back({0, 0.0, "0", true, {1,0,0,0}, {0,0,0}});
 doc.world_json = R"({"metric_scale":true})";
-wurld::write_file("encoded.webm", "out.wl.webm", doc);   // or wurld::attach(bytes, doc)
+wurld::write_file("encoded.webm", "out.wurld.webm", doc);   // or wurld::attach(bytes, doc)
 ```
 
 Inserting tags shifts every Cluster, so Cues are rebuilt at the new offsets and
@@ -420,7 +420,7 @@ job runs it).
 - **`Sequence.fetch_frames(indices)`**: local partial decode — reading 3 frames
   of a 10k-frame file no longer decodes the other clusters (same cluster-splice
   machinery as remote access, bit-exact parity tested).
-- **EuRoC MAV importer** (`wurld convert MH_01_easy out.wl.webm`): the first
+- **EuRoC MAV importer** (`wurld convert MH_01_easy out.wurld.webm`): the first
   real exercise of rigs + IMU together — cam0 posed video via
   `T_WB @ T_BS`, both cameras' OPENCV calibration plus a `body` rig
   (camera-to-body extrinsics; `rig_c2w` derives cam1 poses), imu0 with
@@ -460,7 +460,7 @@ job runs it).
   libvpx + the chromapakz C core cross-compiled for iOS
   (`ios/scripts/build-native.sh`), Swift bindings over the `dc_stream_*`
   streaming ABI, and a Swift port of the pose-weaving `StreamWriter`
-  (`.wl.webm` / `.r3d` toggle in the UI). The recording pipeline is verified
+  (`.wurld.webm` / `.r3d` toggle in the UI). The recording pipeline is verified
   without a device: `ios/scripts/verify-pipeline.sh` compiles the app's own
   writer+encoder for macOS, records a synthetic take, and validates it with the
   Python reader (poses at f32 precision vs analytic ground truth, exact f64
@@ -468,19 +468,19 @@ job runs it).
   ffmpeg-clean). ARKit-on-hardware remains the one untested link.
 - **ffmpeg needs no patch**: ffprobe already surfaces the complete WURLD
   JSON document as a format tag —
-  `ffprobe -show_entries format_tags=WURLD -of json scene.wl.webm` yields
+  `ffprobe -show_entries format_tags=WURLD -of json scene.wurld.webm` yields
   cameras, conventions, and (for JSON-frame files) every pose, in any
   ffmpeg-based tool. Binary pose tables/IMU tags don't surface; everything else
   does. The roadmap's "ffmpeg demuxer patch" is retired as unnecessary.
 
 ## v0.5: Record3D, MCAP/Foxglove, ranged viewer, nerfstudio
 
-- **Record3D importer** (`wurld convert capture.r3d out.wl.webm`): the .r3d zip
+- **Record3D importer** (`wurld convert capture.r3d out.wurld.webm`): the .r3d zip
   layout confirmed against the app author's own snippets and four community
   parsers — column-major K, scalar-last ARKit quaternions, LZFSE float32-meters
   depth (NaN invalid, float16 export variant handled), 0/1/2 confidence. Needs
   `pip install wurld[record3d]`.
-- **MCAP export** (`wurld extract scene.wl.webm out.mcap --format mcap`):
+- **MCAP export** (`wurld extract scene.wurld.webm out.mcap --format mcap`):
   Foxglove-ready jsonschema channels (`/camera/pose`, `/camera/image` jpeg,
   `/camera/depth` 16UC1 bit-exact codes, `/camera/calibration`, `/imu/<id>`) plus
   the full WURLD document as an MCAP metadata record. Needs `[mcap]` extra.
@@ -490,7 +490,7 @@ job runs it).
   download when the server lacks ranges. `scripts/range_server.py` is a
   range-capable dev server (python's builtin lacks Range).
 - **nerfstudio DataParser** (`wurld.integrations.nerfstudio_parser`): reads a
-  .wl.webm directly (frames extracted to a `<file>.cache/` beside it), poses
+  .wurld.webm directly (frames extracted to a `<file>.cache/` beside it), poses
   converted to nerfstudio's convention, metric depth via
   `depth_unit_scale_factor` — verified against a live nerfstudio 1.1.5 install.
 

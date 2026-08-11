@@ -56,7 +56,7 @@ def r3d_fixture(scene, tmp_path):
 
 def test_record3d_import(r3d_fixture, scene, tmp_path):
     assert detect(r3d_fixture) == "record3d"
-    out = tmp_path / "r3d.wl.webm"
+    out = tmp_path / "r3d.wurld.webm"
     record3d.from_record3d(r3d_fixture, out)
     seq = wl.read(out)
 
@@ -84,7 +84,7 @@ def test_record3d_import(r3d_fixture, scene, tmp_path):
 
 
 def test_record3d_at_rgb(r3d_fixture, scene, tmp_path):
-    out = tmp_path / "rgb.wl.webm"
+    out = tmp_path / "rgb.wurld.webm"
     record3d.from_record3d(r3d_fixture, out, at="rgb")
     seq = wl.read(out)
     H, W = scene["rgb"].shape[1:3]
@@ -106,7 +106,7 @@ def test_record3d_float16_depth_variant(r3d_fixture, scene, tmp_path):
                 d = np.frombuffer(liblzfse.decompress(data), np.float32)
                 data = liblzfse.compress(d.astype(np.float16).tobytes())
             z.writestr(name, data)
-    out = tmp_path / "f16.wl.webm"
+    out = tmp_path / "f16.wurld.webm"
     record3d.from_record3d(p, out)
     seq = wl.read(out)
     dm = seq.depth_meters(0)
