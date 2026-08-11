@@ -73,6 +73,11 @@ jobs:
         run: |
           npm pack
           tar tzf wurld-core-*.tgz
+      # docs/viewer is generated and committed, so it can lag its source without
+      # anything failing — and the tests exercise viewer/, not the copy that is
+      # actually served. See the script for why this needs two separate checks.
+      - name: the hosted viewer is current
+        run: scripts/check-pages-fresh.sh
 
   # The viewer decodes through chromapakz, which needs WebCodecs, and draws into
   # 2D canvases and WebGL — none of which jsdom has. Testing it means running it.
