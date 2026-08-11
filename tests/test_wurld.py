@@ -118,7 +118,7 @@ def test_tum_roundtrip(wl_file, scene, tmp_path):
     out = tmp_path / "tum"
     tum.to_tum(wl_file, out)
     assert detect(out) == "tum"
-    back = tmp_path / "back.wl.webm"
+    back = tmp_path / "back.wurld.webm"
     tum.from_tum(out, back, camera=scene["cameras"]["0"])
     seq = wl.read(back)
     assert len(seq.frames) == 10
@@ -137,7 +137,7 @@ def test_tum_native_depth_bit_exact(tmp_path, scene, wl_file):
     # TUM -> wl -> TUM: raw u16 must be preserved exactly (linear native units).
     t1 = tmp_path / "t1"
     tum.to_tum(wl_file, t1)
-    w2 = tmp_path / "w2.wl.webm"
+    w2 = tmp_path / "w2.wurld.webm"
     tum.from_tum(t1, w2, camera=scene["cameras"]["0"])
     t2 = tmp_path / "t2"
     tum.to_tum(w2, t2)
@@ -156,7 +156,7 @@ def test_transforms_roundtrip(wl_file, scene, tmp_path):
     assert detect(out) == "nerfstudio"
     doc = json.loads((out / "transforms.json").read_text())
     assert len(doc["frames"]) == 10 and "depth_file_path" in doc["frames"][0]
-    back = tmp_path / "back.wl.webm"
+    back = tmp_path / "back.wurld.webm"
     nerfstudio.from_transforms(out / "transforms.json", back)
     seq = wl.read(back)
     for i in (0, 3, 9):
@@ -171,7 +171,7 @@ def test_colmap_roundtrip(wl_file, scene, tmp_path):
     out = tmp_path / "cm"
     colmap.to_colmap(wl_file, out)
     assert detect(out) == "colmap"
-    back = tmp_path / "back.wl.webm"
+    back = tmp_path / "back.wurld.webm"
     colmap.from_colmap(out, out / "images", back)
     seq = wl.read(back)
     assert seq.world["metric_scale"] is False  # COLMAP scale is arbitrary
@@ -218,7 +218,7 @@ def test_colmap_bin_parsing(tmp_path, scene, wl_file):
 def test_cli_demo_info_extract(tmp_path, capsys):
     from wurld.cli import main
 
-    demo = tmp_path / "demo.wl.webm"
+    demo = tmp_path / "demo.wurld.webm"
     assert main(["demo", str(demo), "--frames", "6", "--width", "96", "--height", "72"]) == 0
     capsys.readouterr()  # clear demo output
     assert main(["info", str(demo)]) == 0
@@ -226,7 +226,7 @@ def test_cli_demo_info_extract(tmp_path, capsys):
     assert info_doc["video"]["frames"] == 6
     assert main(["extract", str(demo), str(tmp_path / "tum_out"), "--format", "tum"]) == 0
     assert (tmp_path / "tum_out" / "groundtruth.txt").exists()
-    back = tmp_path / "back.wl.webm"
+    back = tmp_path / "back.wurld.webm"
     assert main(["convert", str(tmp_path / "tum_out"), str(back)]) == 0
     seq = wl.read(back)
     assert len(seq.frames) == 6
@@ -239,7 +239,7 @@ def test_single_camera_export_warns_when_a_stream_is_dropped(tmp_path, caplog):
 
     from wurld.converters import tum as tum_conv
 
-    src = _P("conformance/vectors/v05_stereo.wl.webm")
+    src = _P("conformance/vectors/v05_stereo.wurld.webm")
     if not src.exists():
         pytest.skip("conformance vectors not generated")
 
@@ -258,7 +258,7 @@ def test_hdr_export_to_an_8bit_format_says_why(tmp_path):
     from wurld.converters import tum as tum_conv
 
     W2, H2 = 32, 24
-    src = tmp_path / "hdr.wl.webm"
+    src = tmp_path / "hdr.wurld.webm"
     codes = np.stack([np.full((H2, W2, 4), 400 + 40 * i, np.uint16) for i in range(3)])
     f = 1.1 * W2
     wl.write(src,

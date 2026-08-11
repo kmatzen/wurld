@@ -39,7 +39,7 @@ def test_streamreader_matches_batch_read(wl_file, scene, chunk_size):
 
 
 def test_streamreader_binary_table(scene, tmp_path):
-    p = tmp_path / "bin.wl.webm"
+    p = tmp_path / "bin.wurld.webm"
     wl.write(p, cameras=scene["cameras"], frames=scene["frames"], rgb=scene["rgba"],
              frames_format="binary")
     r, events = _feed_in_chunks(p.read_bytes(), 4096)
@@ -118,7 +118,7 @@ def test_streamreader_live_chunked_form(scene):
 def test_batch_reader_accepts_live_chunked_file(scene, tmp_path):
     """A crash-truncated live file (no consolidated table) reads via chunk concat."""
     stream = _make_live_style_stream(scene)
-    p = tmp_path / "live.wl.webm"
+    p = tmp_path / "live.wurld.webm"
     p.write_bytes(stream)
     seq = wl.read(p)
     assert len(seq.frames) == len(scene["frames"])

@@ -1,12 +1,19 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 — 2026-08-11
+
+The recommended file suffix becomes `.wurld.webm`, and the browser viewer stops
+showing you the previous file when you open a new one.
+
+No format change: `FORMAT_VERSION` stays at 1.2 and every existing file remains
+valid and unchanged. The suffix has always been a recommendation, never a thing
+readers key on.
 
 ### Fixed
 
 - **`wurld index` skipped valid files named `.webm`.** SPEC §2 allows the plain
-  suffix alongside the recommended `.wl.webm`, but the default glob was
-  `*.wl.webm`, so a corpus named the other legal way indexed as nothing without
+  suffix alongside the recommended `.wurld.webm`, but the default glob was
+  `*.wurld.webm`, so a corpus named the other legal way indexed as nothing without
   a word. The default is now `*.webm`, which covers both.
 - A `.webm` that is *not* a wurld file is now passed over in silence rather than
   reported as a broken member — a directory holding ordinary video beside
@@ -16,11 +23,62 @@
 
 ### Changed
 
-- SPEC §2 now says *why* the suffix is `.wl.webm`: the trailing `.webm` is
+- **The recommended suffix is now `.wurld.webm`, was `.wl.webm`.** The `wl` stood
+  for worldline, the format's name before it became wurld, and nothing had used
+  that name for some time. OME-TIFF — the precedent SPEC §2 cites — spells its
+  format's name in full as `.ome.tiff`, so this follows it properly.
+
+  Nothing about reading changes and no existing file becomes invalid. The suffix
+  has always been a recommendation: a reader identifies a wurld file by its
+  `WURLD` tag, never by its name, and no code in this repository branches on the
+  suffix. `.wl.webm` files keep working, `wurld index` already globs `*.webm` so
+  it finds both, and SPEC §2 now records the old spelling as still valid. Only
+  the defaults, docs and the conformance vector filenames have moved.
+- SPEC §2 now says *why* the suffix is `.wurld.webm`: the trailing `.webm` is
   load-bearing, because every OS, player and CDN keys off the last suffix, and a
-  distinct suffix like `.wurld` would forfeit the property the design is built
-  on. Same shape as OME-TIFF's `.ome.tiff`. Tools must not assume `.wl` is
-  present.
+  bare `.wurld` would forfeit the property the design is built on. Tools must not
+  assume the `.wurld` part is present.
+
+### Fixed (viewer)
+
+- **Opening a second file could leave the first one on screen.** A file the
+  decoder rejected threw out of the drop handler into nothing: no error was
+  shown and every pane kept displaying the previous capture, so the viewer
+  looked like it had simply ignored the drop. Failures are now reported in the
+  metadata line and the view is emptied.
+- The RGB and depth panes were write-only — each was painted when data existed
+  and otherwise left alone — so a file with no depth kept showing the previous
+  file's depth map. Panes with nothing to show are now cleared, on file swap and
+  per frame.
+- `camera`, `depthMap` and the lazy-loading cursor survived a load. Stale
+  intrinsics would have reprojected new depth into a plausible but wrong point
+  cloud, and a stale cursor kept issuing ranged reads against the previous
+  URL. All three are reset before the new file is applied.
+- The previous file's blob URL is now revoked instead of being pinned for the
+  life of the page, and re-picking the same path in the file dialog works.
+
+  The symptom that started this — a dropped file appearing to be ignored — was
+  mostly **chromapakz** refusing to decode RGB-only files at all, fixed in
+  chromapakz 0.9.1 and required for the viewer to open a capture with no depth
+  signal. The dependency floor moves accordingly.
+
+### Changed (packaging)
+
+- chromapakz floor raised to 0.9.1 in `pyproject.toml` and `package.json`.
+- The hosted viewer's pinned chromapakz CDN build had drifted a minor behind the
+  dependency — the published demo ran an older decoder than the tests did. It is
+  now pinned to 0.9.1 and `scripts/build-pages.sh` says to keep the two in step.
+- `docs/samples/synthetic-orbit` follows the suffix rename; the hosted page links
+  it by name and would otherwise have 404'd.
+
+### Changed (iOS)
+
+- WurldCam writes `.wurld.webm` rather than `.wl.webm`.
+- The camera purpose string now gives the reason and an example of the use, which
+  is what App Store guideline 5.1.1 asks for; the old one restated the permission
+  in jargon. Changed in both `project.yml` and `Sources/Info.plist`, which
+  xcodegen keeps in step.
+- `ios/APP_REVIEW_NOTES.md` answers the App Review 2.1 information request.
 
 ## 1.3.0 — 2026-08-09
 

@@ -8,7 +8,7 @@ let W = 64, H = 48, N = 20, FPS = 10
 let NEAR = 0.1, FAR = 12.0
 
 let outURL = URL(fileURLWithPath: CommandLine.arguments.count > 1
-                 ? CommandLine.arguments[1] : "swift_take.wl.webm")
+                 ? CommandLine.arguments[1] : "swift_take.wurld.webm")
 FileManager.default.createFile(atPath: outURL.path, contents: nil)
 let file = try FileHandle(forWritingTo: outURL)
 

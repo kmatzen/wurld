@@ -5,7 +5,7 @@
 // attach as JSON so the tests can drive it without a C++ test harness having to
 // construct every case in code.
 //
-//   wurld_attach in.webm out.wl.webm spec.json
+//   wurld_attach in.webm out.wurld.webm spec.json
 //
 // spec.json:
 //   { "cameras": {...}, "frames": [...], "signals": [...],
@@ -104,7 +104,7 @@ wurld::WriteDoc parse_spec(const std::string& text) {
 
 int main(int argc, char** argv) {
     if (argc < 4) {
-        std::fprintf(stderr, "usage: wurld_attach <in.webm> <out.wl.webm> <spec.json>\n");
+        std::fprintf(stderr, "usage: wurld_attach <in.webm> <out.wurld.webm> <spec.json>\n");
         return 2;
     }
     try {

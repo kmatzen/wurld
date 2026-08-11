@@ -75,7 +75,7 @@ def _depth_via_ffmpeg(path, tmp):
     ("06_stereo_rig.py", "stereo"),
 ])
 def test_the_documented_extraction_reproduces_the_reader(script, name, tmp_path):
-    src = tmp_path / f"{name}.wl.webm"
+    src = tmp_path / f"{name}.wurld.webm"
     r = subprocess.run([sys.executable, str(EXAMPLES / script), str(src)],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -100,7 +100,7 @@ def test_depth_is_not_at_a_fixed_track_index(tmp_path):
     positions = {}
     for script, name in [("01_feedforward_reconstruction.py", "mono"),
                          ("06_stereo_rig.py", "stereo")]:
-        src = tmp_path / f"{name}.wl.webm"
+        src = tmp_path / f"{name}.wurld.webm"
         subprocess.run([sys.executable, str(EXAMPLES / script), str(src)],
                        capture_output=True, check=True)
         positions[name] = _track_index(src, "signal-depth-hi")
@@ -117,7 +117,7 @@ def test_the_second_camera_can_be_extracted_by_title(tmp_path):
     calibration that describes them, so the recipe resolves by title rather than
     by position.
     """
-    src = tmp_path / "stereo.wl.webm"
+    src = tmp_path / "stereo.wurld.webm"
     subprocess.run([sys.executable, str(EXAMPLES / "06_stereo_rig.py"), str(src)],
                    capture_output=True, check=True)
     seq = wl.read(src)

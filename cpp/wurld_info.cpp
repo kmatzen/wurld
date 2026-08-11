@@ -5,8 +5,8 @@
 // output is deliberately machine-readable so `tests/test_cpp_reader.py` can
 // compare it against the Python reader field-by-field rather than eyeballing it.
 //
-//   wurld_info scene.wl.webm            summary
-//   wurld_info scene.wl.webm --json     everything the reader parsed
+//   wurld_info scene.wurld.webm            summary
+//   wurld_info scene.wurld.webm --json     everything the reader parsed
 
 #include <cstdio>
 #include <cstring>
@@ -128,7 +128,7 @@ void dump_summary(const wurld::Document& doc, const char* path) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: wurld_info <file.wl.webm> [--json]\n");
+        std::fprintf(stderr, "usage: wurld_info <file.wurld.webm> [--json]\n");
         return 2;
     }
     bool as_json = argc > 2 && std::strcmp(argv[2], "--json") == 0;

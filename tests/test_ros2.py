@@ -43,7 +43,7 @@ TS = get_typestore(Stores.ROS2_HUMBLE)
 def source(tmp_path_factory):
     """A real example file: two cameras, IMU, rig, depth."""
     d = tmp_path_factory.mktemp("ros2src")
-    out = d / "rig.wl.webm"
+    out = d / "rig.wurld.webm"
     r = subprocess.run([sys.executable, str(ROOT / "examples" / "04_robot_rig_imu.py"),
                         str(out)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -127,7 +127,7 @@ def test_pose_round_trips_exactly(source, bag):
 
 def test_unposed_frames_emit_no_transform(tmp_path):
     """A gap in tf is honest; an identity transform is a camera that never was."""
-    src = tmp_path / "ff.wl.webm"
+    src = tmp_path / "ff.wurld.webm"
     r = subprocess.run([sys.executable,
                         str(ROOT / "examples" / "01_feedforward_reconstruction.py"),
                         str(src)], capture_output=True, text=True)
@@ -228,7 +228,7 @@ def test_imu_declares_that_it_has_no_orientation(source, bag):
 
 def test_import_round_trip(source, bag, tmp_path):
     """bag -> wurld must recover poses, calibration and pixels."""
-    out = ros2.from_rosbag2(bag, tmp_path / "back.wl.webm")
+    out = ros2.from_rosbag2(bag, tmp_path / "back.wurld.webm")
     assert v.validate(out) == []
 
     src, back = wl.read(source), wl.read(out)
@@ -260,12 +260,12 @@ def test_import_round_trip(source, bag, tmp_path):
 
 
 def test_import_preserves_unposed_frames(tmp_path):
-    src = tmp_path / "ff.wl.webm"
+    src = tmp_path / "ff.wurld.webm"
     subprocess.run([sys.executable,
                     str(ROOT / "examples" / "01_feedforward_reconstruction.py"),
                     str(src)], capture_output=True, check=True)
     bag = ros2.to_rosbag2(src, tmp_path / "ffbag")
-    back = wl.read(ros2.from_rosbag2(bag, tmp_path / "ffback.wl.webm"))
+    back = wl.read(ros2.from_rosbag2(bag, tmp_path / "ffback.wurld.webm"))
     lost = [f.i for f in back.frames if not f.pose_valid]
     assert lost == [f.i for f in wl.read(src).frames if not f.pose_valid]
 
@@ -297,7 +297,7 @@ def test_cli_export_and_import(source, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "rosbag2" in r.stdout and "/tf" in r.stdout
 
-    back = tmp_path / "cliback.wl.webm"
+    back = tmp_path / "cliback.wurld.webm"
     r = subprocess.run([sys.executable, "-m", "wurld.cli", "ros2", "import",
                         str(bag), str(back)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -322,7 +322,7 @@ def test_poses_only_export_skips_pixels(source, tmp_path):
 def stereo_bag(tmp_path_factory):
     """A real stereo file: both eyes must survive the bridge."""
     d = tmp_path_factory.mktemp("ros2stereo")
-    src = d / "stereo.wl.webm"
+    src = d / "stereo.wurld.webm"
     r = subprocess.run([sys.executable, str(ROOT / "examples" / "06_stereo_rig.py"),
                         str(src)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -407,7 +407,7 @@ def test_export_memory_does_not_track_sequence_length(tmp_path):
         return path
 
     def peak_for(n):
-        src = build(n, tmp_path / f"src{n}.wl.webm")
+        src = build(n, tmp_path / f"src{n}.wurld.webm")
         tracemalloc.start()
         ros2.to_rosbag2(src, tmp_path / f"bag{n}")
         _, peak = tracemalloc.get_traced_memory()
@@ -434,7 +434,7 @@ def test_export_memory_does_not_track_sequence_length(tmp_path):
 def hdr_file(tmp_path_factory):
     """A 10-bit PQ display track: seq.rgb comes back uint16, not uint8."""
     W2, H2, N2 = 64, 48, 6
-    out = tmp_path_factory.mktemp("ros2hdr") / "hdr.wl.webm"
+    out = tmp_path_factory.mktemp("ros2hdr") / "hdr.wurld.webm"
     codes = np.stack([np.full((H2, W2, 4), 400 + 40 * i, np.uint16) for i in range(N2)])
     f = 1.1 * W2
     wl.write(out,
@@ -475,7 +475,7 @@ def test_importing_rgb16_is_refused_rather_than_misread(hdr_file, tmp_path):
     """A bag cannot record the transfer function, so the round trip is not one."""
     bag = ros2.to_rosbag2(hdr_file, tmp_path / "hdrbag2")
     with pytest.raises(ValueError, match="transfer function"):
-        ros2.from_rosbag2(bag, tmp_path / "back.wl.webm")
+        ros2.from_rosbag2(bag, tmp_path / "back.wurld.webm")
 
 
 def test_rgb_encoding_rejects_types_it_cannot_describe():

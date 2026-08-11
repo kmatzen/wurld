@@ -17,7 +17,7 @@
 // returns a row-major 4x4.
 //
 //   #include "wurld.hpp"
-//   auto doc = wurld::read("scene.wl.webm");
+//   auto doc = wurld::read("scene.wurld.webm");
 //   for (const auto& f : doc.frames)
 //       if (f.pose_valid) use(f.c2w());
 //

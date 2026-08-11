@@ -18,7 +18,7 @@ sentinel because every bit pattern denotes a value.
 Note what this is *not*: an HDR display track. That is display-referred (PQ/HLG,
 absolute nits) and lives in the lossy RGB stream. This is the data.
 
-Run:  python examples/05_hdr_exr_render.py out.wl.webm
+Run:  python examples/05_hdr_exr_render.py out.wurld.webm
 """
 
 import sys
@@ -114,4 +114,4 @@ def main(out_path):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "hdr_render.wl.webm"))
+    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "hdr_render.wurld.webm"))

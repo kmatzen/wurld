@@ -52,7 +52,7 @@ def test_fetch_header_on_large_file_is_a_tiny_fraction(tmp_path):
     z = np.where(depth_m > 0, np.clip(depth_m, 0.5, 40.0), np.nan)
     d16 = cz.quantize_inverse(z, near=0.5, far=40.0)
     rgba = np.concatenate([rgb, np.full(rgb.shape[:3] + (1,), 255, np.uint8)], -1)
-    p = tmp_path / "big.wl.webm"
+    p = tmp_path / "big.wurld.webm"
     wl.write(p, cameras=cameras, frames=frames, rgb=rgba,
              signals={"depth": d16}, specs={"depth": cz.inverse_depth_spec(0.5, 40.0)},
              signal_meta=[wl.SignalMeta("depth", "depth",
@@ -67,7 +67,7 @@ def test_fetch_header_on_large_file_is_a_tiny_fraction(tmp_path):
 def test_fetch_header_rejects_live_streams(scene, tmp_path):
     from tests.test_stream import _make_live_style_stream
 
-    p = tmp_path / "live.wl.webm"
+    p = tmp_path / "live.wurld.webm"
     p.write_bytes(_make_live_style_stream(scene))
     with pytest.raises(ValueError, match="no SeekHead"):
         remote.fetch_header(remote.file_fetcher(p))
@@ -102,7 +102,7 @@ def test_fetch_frames_multi_cluster(tmp_path):
     z = np.where(depth_m > 0, np.clip(depth_m, 0.5, 40.0), np.nan)
     d16 = cz.quantize_inverse(z, near=0.5, far=40.0)
     rgba = np.concatenate([rgb, np.full(rgb.shape[:3] + (1,), 255, np.uint8)], -1)
-    p = tmp_path / "long.wl.webm"
+    p = tmp_path / "long.wurld.webm"
     wl.write(p, cameras=cameras, frames=frames, rgb=rgba,
              signals={"depth": d16}, specs={"depth": cz.inverse_depth_spec(0.5, 40.0)},
              signal_meta=[wl.SignalMeta("depth", "depth",
@@ -134,7 +134,7 @@ def test_fetch_frames_rejects_pre_cadence_files(tmp_path):
     d16 = cz.quantize_inverse(np.where(depth_m > 0, np.clip(depth_m, 0.5, 40.0), np.nan),
                               near=0.5, far=40.0)
     rgba = np.concatenate([rgb, np.full(rgb.shape[:3] + (1,), 255, np.uint8)], -1)
-    src = tmp_path / "multi.wl.webm"
+    src = tmp_path / "multi.wurld.webm"
     wl.write(src, cameras=cameras, frames=frames, rgb=rgba,
              signals={"depth": d16}, specs={"depth": cz.inverse_depth_spec(0.5, 40.0)})
 
@@ -151,7 +151,7 @@ def test_fetch_frames_rejects_pre_cadence_files(tmp_path):
             if track == 2:
                 data[tp + 2] &= 0x7F  # clear keyframe bit
                 break
-    p = tmp_path / "old.wl.webm"
+    p = tmp_path / "old.wurld.webm"
     p.write_bytes(bytes(data))
     with pytest.raises(ValueError, match="keyframe"):
         remote.fetch_frames(remote.file_fetcher(p), [35])  # a cluster-1 frame
@@ -165,7 +165,7 @@ def test_sequence_fetch_frames_local_partial_decode(tmp_path):
     d16 = cz.quantize_inverse(np.where(depth_m > 0, np.clip(depth_m, 0.5, 40.0), np.nan),
                               near=0.5, far=40.0)
     rgba = np.concatenate([rgb, np.full(rgb.shape[:3] + (1,), 255, np.uint8)], -1)
-    p = tmp_path / "seq.wl.webm"
+    p = tmp_path / "seq.wurld.webm"
     wl.write(p, cameras=cameras, frames=frames, rgb=rgba,
              signals={"depth": d16}, specs={"depth": cz.inverse_depth_spec(0.5, 40.0)})
 
@@ -186,7 +186,7 @@ def test_iter_frames_bounded_and_exact(tmp_path):
     d16 = cz.quantize_inverse(np.where(depth_m > 0, np.clip(depth_m, 0.5, 40.0), np.nan),
                               near=0.5, far=40.0)
     rgba = np.concatenate([rgb, np.full(rgb.shape[:3] + (1,), 255, np.uint8)], -1)
-    p = tmp_path / "seq.wl.webm"
+    p = tmp_path / "seq.wurld.webm"
     wl.write(p, cameras=cameras, frames=frames, rgb=rgba,
              signals={"depth": d16}, specs={"depth": cz.inverse_depth_spec(0.5, 40.0)})
 
@@ -202,9 +202,9 @@ def test_iter_frames_bounded_and_exact(tmp_path):
 def test_cli_trim(tmp_path, capsys):
     from wurld.cli import main
 
-    demo = tmp_path / "demo.wl.webm"
+    demo = tmp_path / "demo.wurld.webm"
     assert main(["demo", str(demo), "--frames", "90", "--width", "96", "--height", "72"]) == 0
-    out = tmp_path / "cut.wl.webm"
+    out = tmp_path / "cut.wurld.webm"
     assert main(["trim", str(demo), str(out), "--frames", "30:60"]) == 0
 
     src, cut = wl.read(demo), wl.read(out)

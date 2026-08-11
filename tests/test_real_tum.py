@@ -65,7 +65,7 @@ def _read_pairs(path):
 
 @pytest.fixture(scope="module")
 def converted(tmp_path_factory):
-    out = tmp_path_factory.mktemp("tumreal") / "f1desk.wl.webm"
+    out = tmp_path_factory.mktemp("tumreal") / "f1desk.wurld.webm"
     tum.from_tum(SEQ_DIR, out)
     return out, wl.read(out)
 

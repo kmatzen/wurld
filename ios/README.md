@@ -4,12 +4,12 @@ Records ARKit LiDAR captures (RGB + metric depth + confidence + camera poses)
 into a **Record3D-compatible `.r3d`** file that wurld ingests directly:
 
 ```sh
-wurld convert wurld-2026-….r3d out.wl.webm     # needs [record3d] extra
+wurld convert wurld-2026-….r3d out.wurld.webm     # needs [record3d] extra
 ```
 
 ## Two formats (toggle in the UI)
 
-- **`.wl.webm` (default, v2)** — wurld recorded directly on-device:
+- **`.wurld.webm` (default, v2)** — wurld recorded directly on-device:
   chromapakz VP9-lossless depth via the `dc_stream_*` C ABI (libvpx cross-built
   for iOS), poses woven live as `WURLD_POSES` chunk tags with a consolidated
   table on stop. Crash-safe: an interrupted take is a valid, fully-posed file up

@@ -14,7 +14,7 @@
 static void use(const std::array<double,16>&) {}
 
 void reader_snippet() {                       // README: C++ reader
-    auto doc = wurld::read("scene.wl.webm");
+    auto doc = wurld::read("scene.wurld.webm");
     for (const auto& f : doc.frames)
         if (f.pose_valid) use(f.c2w());
 }
@@ -24,7 +24,7 @@ void writer_snippet() {                       // README: Writing from C++
     doc.cameras["0"] = {"PINHOLE", 640, 480, {525, 525, 320, 240}};
     doc.frames.push_back({0, 0.0, "0", true, {1,0,0,0}, {0,0,0}});
     doc.world_json = R"({"metric_scale":true})";
-    wurld::write_file("encoded.webm", "out.wl.webm", doc);
+    wurld::write_file("encoded.webm", "out.wurld.webm", doc);
 }
 
 void stream_snippet(std::ofstream& out) {     // README: Recording from C++

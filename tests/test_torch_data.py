@@ -55,7 +55,7 @@ def _write_seq(path, n, *, w=32, h=24):
 def manifest_path(tmp_path_factory):
     root = tmp_path_factory.mktemp("torchcorpus")
     for i, n in enumerate(COUNTS):
-        _write_seq(root / f"seq{i}.wl.webm", n)
+        _write_seq(root / f"seq{i}.wurld.webm", n)
     m, failures = col.build_manifest(root, relative_to=root)
     assert failures == []
     return m.write(root / "collection.json")

@@ -24,7 +24,7 @@ def scene():
 
 @pytest.fixture(scope="session")
 def wl_file(scene, tmp_path_factory):
-    path = tmp_path_factory.mktemp("wl") / "scene.wl.webm"
+    path = tmp_path_factory.mktemp("wl") / "scene.wurld.webm"
     wl.write(
         path,
         cameras=scene["cameras"],

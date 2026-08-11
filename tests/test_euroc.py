@@ -72,7 +72,7 @@ def euroc_fixture(scene, tmp_path):
 def test_euroc_import(euroc_fixture, scene, tmp_path):
     seq_dir, t_bs0, t_bs1, t_bs_imu = euroc_fixture
     assert detect(seq_dir) == "euroc"
-    out = tmp_path / "euroc.wl.webm"
+    out = tmp_path / "euroc.wurld.webm"
     euroc.from_euroc(seq_dir, out)
     seq = wl.read(out)
 

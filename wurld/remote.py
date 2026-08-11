@@ -3,7 +3,7 @@
 A batch wurld file is metadata-first with a SeekHead, so a client on S3/CDN
 can pull **all calibration and every pose without downloading video**:
 
-    hdr = fetch_header(http_fetcher("https://cdn/scene.wl.webm"))
+    hdr = fetch_header(http_fetcher("https://cdn/scene.wurld.webm"))
     hdr.frames[0].c2w, hdr.cameras["0"].K, hdr.video["frames"]
     hdr.bytes_fetched      # typically <1% of the file
 

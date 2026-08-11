@@ -208,8 +208,8 @@ def build_manifest(
     """Describe every file in ``sources``; a directory is globbed recursively.
 
     The default pattern is ``*.webm``, which covers both the recommended
-    ``.wl.webm`` suffix and the plain ``.webm`` that SPEC §2 also allows. Globbing
-    only ``*.wl.webm`` meant a corpus named the other legal way indexed as
+    ``.wurld.webm`` suffix and the plain ``.webm`` that SPEC §2 also allows. Globbing
+    only ``*.wurld.webm`` meant a corpus named the other legal way indexed as
     nothing, without a word.
 
     A ``.webm`` with no ``WURLD`` tag is a plain video, not a broken member: it

@@ -17,8 +17,8 @@ swiftc -O "$ROOT/WurldCam/Harness/main.swift" \
   "$ROOT/WurldCam/Sources/ZipWriter.swift" \
   -import-objc-header "$ROOT/WurldCam/Sources/WurldCam-Bridging-Header.h" \
   -I "$CHROMAPAKZ_SRC/native" -L "$OUT" -lchromapakz_mac -o "$OUT/harness"
-"$OUT/harness" "$OUT/take.wl.webm"
-"$REPO/.venv/bin/python" - "$OUT/take.wl.webm" <<'EOF'
+"$OUT/harness" "$OUT/take.wurld.webm"
+"$REPO/.venv/bin/python" - "$OUT/take.wurld.webm" <<'EOF'
 import sys, numpy as np
 sys.path.insert(0, ".")
 import wurld as wl

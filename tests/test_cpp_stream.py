@@ -92,7 +92,7 @@ def captured(tmp_path_factory):
         (chunkdir / f"chunk_{k:05d}.bin").write_bytes(c)
 
     # 2. The Python StreamWriter's output for the same frames, as the reference.
-    py_out = d / "python.wl.webm"
+    py_out = d / "python.wurld.webm"
     with open(py_out, "wb") as fh:
         w = StreamWriter(fh.write, cameras=CAMERAS, world=WORLD, fps=FPS, has_rgb=True)
         for i in range(N):
@@ -116,7 +116,7 @@ def captured(tmp_path_factory):
 @pytest.fixture(scope="module")
 def cpp_out(weave_tool, captured):
     d, chunkdir, _py, _frames_, _rgb, _n = captured
-    out = d / "cpp.wl.webm"
+    out = d / "cpp.wurld.webm"
     r = subprocess.run([str(weave_tool), str(chunkdir), str(out), str(d / "spec.json")],
                        capture_output=True, text=True)
     assert r.returncode == 0, f"wurld_weave failed:\n{r.stdout}\n{r.stderr}"
@@ -215,7 +215,7 @@ def test_an_interrupted_recording_still_reads(cpp_out):
     _, ps, pe = ebml._segment_bounds(data)
     last_cluster_end = max(pend for eid, _es, _p, pend in ebml._top_level(data, ps, pe)
                            if eid == ebml.CLUSTER)
-    cut = cpp_out[0].with_name("killed.wl.webm")
+    cut = cpp_out[0].with_name("killed.wurld.webm")
     cut.write_bytes(data[:last_cluster_end])
 
     tags = ebml.read_all_tags(cut.read_bytes())
@@ -234,7 +234,7 @@ def test_imu_is_interleaved_too(weave_tool, captured, tmp_path):
     spec["imu"] = {"imu0": rows}
     p = tmp_path / "imu.spec.json"
     p.write_text(json.dumps(spec))
-    out = tmp_path / "imu.wl.webm"
+    out = tmp_path / "imu.wurld.webm"
     r = subprocess.run([str(weave_tool), str(chunkdir), str(out), str(p)],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -254,7 +254,7 @@ def test_finish_without_any_chunk_is_refused(weave_tool, tmp_path):
     p = tmp_path / "s.json"
     p.write_text(json.dumps(spec))
     r = subprocess.run([str(weave_tool), str(tmp_path / "empty"),
-                        str(tmp_path / "x.wl.webm"), str(p)],
+                        str(tmp_path / "x.wurld.webm"), str(p)],
                        capture_output=True, text=True)
     assert r.returncode == 1
     assert "no chunks" in r.stderr

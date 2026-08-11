@@ -68,14 +68,14 @@ def sources(tmp_path_factory):
     d = tmp_path_factory.mktemp("matrix")
     made = {}
     for kind, script in KINDS.items():
-        out = d / f"{kind}.wl.webm"
+        out = d / f"{kind}.wurld.webm"
         r = subprocess.run([sys.executable, str(EXAMPLES / script), str(out)],
                            capture_output=True, text=True)
         assert r.returncode == 0, f"{script} failed:\n{r.stderr}"
         made[kind] = out
 
     w, h, n = 32, 24, 4
-    hdr = d / "hdr.wl.webm"
+    hdr = d / "hdr.wurld.webm"
     f = 1.1 * w
     wl.write(hdr,
              cameras={"0": wl.Camera("PINHOLE", w, h, [f, f, w / 2, h / 2])},

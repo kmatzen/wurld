@@ -10,7 +10,7 @@ Poses stay single-camera. `cam0` has the trajectory; `cam1`'s pose is derived
 through `rigs`, because a rigid baseline belongs in the calibration once rather
 than restated on every frame where it can drift away from the trajectory.
 
-Run:  python examples/06_stereo_rig.py out.wl.webm
+Run:  python examples/06_stereo_rig.py out.wurld.webm
 """
 
 import sys
@@ -101,4 +101,4 @@ def main(out_path):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "stereo.wl.webm"))
+    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "stereo.wurld.webm"))

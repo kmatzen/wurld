@@ -4,14 +4,14 @@
 // comparison lives in the harness (tests/test_conformance.py) so all three
 // implementations are judged by one piece of code rather than three.
 //
-//   node conformance/run_js.mjs vectors/v03_binary_frames.wl.webm
+//   node conformance/run_js.mjs vectors/v03_binary_frames.wurld.webm
 
 import { readFileSync } from 'node:fs';
 import { readDocument } from '../viewer/wurld.js';
 
 const path = process.argv[2];
 if (!path) {
-  console.error('usage: run_js.mjs <vector.wl.webm>');
+  console.error('usage: run_js.mjs <vector.wurld.webm>');
   process.exit(2);
 }
 

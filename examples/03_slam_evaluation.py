@@ -13,7 +13,7 @@ conversion happens once in the exporter instead of in every consumer. This
 demonstrates the round trip and, given the original ground truth, proves the
 numbers survived it.
 
-Run:  python examples/03_slam_evaluation.py scene.wl.webm out/ [groundtruth.txt]
+Run:  python examples/03_slam_evaluation.py scene.wurld.webm out/ [groundtruth.txt]
 """
 
 import sys

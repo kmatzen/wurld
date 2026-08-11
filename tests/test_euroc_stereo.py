@@ -165,7 +165,7 @@ def _write_fixture(root, frames=None):
 def converted(tmp_path_factory):
     root = tmp_path_factory.mktemp("euroc")
     mav0 = _write_fixture(root)
-    out = root / "euroc.wl.webm"
+    out = root / "euroc.wurld.webm"
     euroc.from_euroc(mav0, out)
     return wl.read(out), out
 
@@ -175,7 +175,7 @@ def mono(tmp_path_factory):
     """stereo=False must still produce the pre-multi-stream single-track file."""
     root = tmp_path_factory.mktemp("euroc_mono")
     mav0 = _write_fixture(root)
-    out = root / "mono.wl.webm"
+    out = root / "mono.wurld.webm"
     euroc.from_euroc(mav0, out, stereo=False)
     return wl.read(out), out
 
@@ -311,7 +311,7 @@ def test_max_frames_converts_a_prefix(tmp_path):
     """The escape hatch for sequences too large to hold at once."""
     root = tmp_path / "prefix"
     mav0 = _write_fixture(root)
-    out = root / "prefix.wl.webm"
+    out = root / "prefix.wurld.webm"
     euroc.from_euroc(mav0, out, max_frames=4)
     seq = wl.read(out)
     assert len(seq.frames) == 4
@@ -335,7 +335,7 @@ def test_a_full_length_sequence_does_not_need_to_fit_in_memory(tmp_path):
         tracemalloc.start()
         # Forced: the fixture is small enough that the size heuristic would
         # choose the batch path, which materialises by design.
-        euroc.from_euroc(mav0, root / "out.wl.webm", streaming=True)
+        euroc.from_euroc(mav0, root / "out.wurld.webm", streaming=True)
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
         return peak
@@ -353,8 +353,8 @@ def test_the_writer_choice_is_visible_and_forcible(tmp_path):
     root = tmp_path / "choice"
     mav0 = _write_fixture(root)
 
-    batch = root / "batch.wl.webm"
-    streamed = root / "stream.wl.webm"
+    batch = root / "batch.wurld.webm"
+    streamed = root / "stream.wurld.webm"
     euroc.from_euroc(mav0, batch, streaming=False)
     euroc.from_euroc(mav0, streamed, streaming=True)
     assert v.validate(batch) == [] and v.validate(streamed) == []

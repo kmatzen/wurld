@@ -53,7 +53,7 @@ def test_streamwriter_roundtrip(scene, tmp_path):
     parts = []
     _, summary = _record(scene, parts)
     assert summary["frames"] == 10
-    p = tmp_path / "live.wl.webm"
+    p = tmp_path / "live.wurld.webm"
     p.write_bytes(b"".join(parts))
 
     seq = wl.read(p)
@@ -68,7 +68,7 @@ def test_streamwriter_roundtrip(scene, tmp_path):
 def test_streamwriter_imu(scene, tmp_path):
     parts = []
     _record(scene, parts, imu=True)
-    p = tmp_path / "imu.wl.webm"
+    p = tmp_path / "imu.wurld.webm"
     p.write_bytes(b"".join(parts))
     seq = wl.read(p)
     got = seq.imu["imu0"]
@@ -101,7 +101,7 @@ def test_streamwriter_progressive_and_crash_safe(scene, tmp_path):
     assert len(r2.frames) >= 1  # everything up to the last flushed chunk
 
     # a truncated file is still a readable wurld file (chunk precedence)
-    p = tmp_path / "crash.wl.webm"
+    p = tmp_path / "crash.wurld.webm"
     p.write_bytes(cut)
     seq = wl.read(p)
     assert 1 <= len(seq.frames) <= 10
@@ -136,7 +136,7 @@ def test_streamwriter_rgb_only(scene, tmp_path):
     summary = w.finish()
     assert summary["frames"] == 10
 
-    p = tmp_path / "poseonly.wl.webm"
+    p = tmp_path / "poseonly.wurld.webm"
     p.write_bytes(b"".join(parts))
     seq = wl.read(p)
     assert len(seq.frames) == 10
@@ -198,7 +198,7 @@ def test_pose_track_does_not_disturb_the_binary_table(scene, tmp_path):
     """The track is additive: the table stays authoritative (SPEC §9)."""
     parts = []
     _record_with_pose_track(scene, parts)
-    path = tmp_path / "live.wl.webm"
+    path = tmp_path / "live.wurld.webm"
     path.write_bytes(b"".join(parts))
 
     seq = wl.read(path)
@@ -214,7 +214,7 @@ def test_ffmpeg_reads_poses_from_a_live_recording(scene, tmp_path):
     """The whole point: no wurld install, no binary tag parsing, just ffmpeg."""
     parts = []
     _record_with_pose_track(scene, parts)
-    path = tmp_path / "live.wl.webm"
+    path = tmp_path / "live.wurld.webm"
     path.write_bytes(b"".join(parts))
 
     out = tmp_path / "poses.vtt"
@@ -235,7 +235,7 @@ def test_pose_track_is_off_by_default(scene, tmp_path):
     """Working files stay lean; the interop copy is opt-in at publish time."""
     parts = []
     _record(scene, parts, frames=6)
-    path = tmp_path / "plain.wl.webm"
+    path = tmp_path / "plain.wurld.webm"
     path.write_bytes(b"".join(parts))
     probe = wl.read(path)
     assert len(probe.frames) == 6
