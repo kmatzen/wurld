@@ -152,7 +152,9 @@ must stay identical — xcodegen regenerates the plist from the yaml.
 - **Screenshots** (Guideline 2.3.3): must show the app in use, not the launch or
   title screen. Use the live capture view with depth visible and the take list —
   not the permission prompt and not an empty start screen.
-- **Privacy policy URL**: mandatory and must be publicly reachable. `PRIVACY.md`
-  is written; the `wurld` repo is private, so GitHub Pages there will not serve
-  it publicly until that changes.
+- ~~**Privacy policy URL**~~ — **done**. Live and publicly reachable over HTTPS at
+  <https://kmatzen.com/wurld/privacy.html>. Paste that into App Store Connect →
+  App Privacy → Privacy Policy URL. (Verified 2026-08-11: 200 over both http and
+  https. GitHub Pages serves `/docs` from the public `kmatzen/wurld` repo;
+  `https_enforced` is off, so prefer the https URL explicitly.)
 - A real capture on hardware, per item 2.
