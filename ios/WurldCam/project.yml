@@ -11,7 +11,11 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
-        UILaunchScreen: {}
+        # Full-bleed launch art (LaunchScreen.storyboard + Assets.xcassets/
+        # LaunchArt): a chair mid-dissolve into a depth point cloud — the app's
+        # purpose as a picture, on the same dark navy the viewer clears to.
+        # ios/scripts/make-launch-art.sh regenerates it.
+        UILaunchStoryboardName: LaunchScreen
         # Guideline 5.1.1 wants the reason and an example of the use, not just a
         # restatement of the permission. Keep this identical to Sources/Info.plist.
         NSCameraUsageDescription: >-

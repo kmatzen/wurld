@@ -16,15 +16,19 @@ The app has no accounts, no purchases, no user-generated content shared with
 anyone, and exactly one permission prompt, so the recording is short. Shot list:
 
 1. Home screen → tap WurldCam (start from launch, as Apple asks).
-2. The camera permission prompt appears — **pause on it long enough to read the
-   purpose string**, then tap Allow. This is the only sensitive-data prompt in
-   the app.
-3. The live camera preview with the depth readout.
-4. Choose the output format (`.wurld.webm` default, or `.r3d`).
-5. Tap record, walk around an object for ~10 seconds, tap stop.
-6. The finished take appears in the on-device list with its duration and size.
-7. Open the ⓘ button to show the licence acknowledgements.
-8. Open the **Files** app → On My iPhone → WurldCam, showing the recording is a
+2. On first launch a three-page walkthrough appears: what the app records, a
+   live check that the device has a LiDAR scanner, and how to hold the phone.
+   Page through it rather than skipping — it shows the reviewer the app's
+   intent in the app's own words.
+3. The camera permission prompt appears as the walkthrough closes — **pause on
+   it long enough to read the purpose string**, then tap Allow. This is the
+   only sensitive-data prompt in the app.
+4. The live camera preview with the depth readout.
+5. Choose the output format (`.wurld.webm` default, or `.r3d`).
+6. Tap record, walk around an object for ~10 seconds, tap stop.
+7. The finished take appears in the on-device list with its duration and size.
+8. Open the ⓘ button to show the licence acknowledgements.
+9. Open the **Files** app → On My iPhone → WurldCam, showing the recording is a
    normal file the user owns and can copy off the device.
 
 Do not cut the permission prompt — a reviewer looking for step 4 of their list
@@ -76,9 +80,11 @@ exercise the app, since the reviewer creates the content by recording.
 
 Complete flow:
 
-1. Launch the app.
-2. Allow camera access when prompted (required — the app records from the camera
-   and LiDAR scanner and cannot function without it).
+1. Launch the app. A three-page walkthrough appears once, on first launch: what
+   the app records, a live check for the LiDAR scanner, and capture technique.
+   It can be skipped, and reopened any time from the ? button.
+2. Allow camera access when prompted as the walkthrough closes (required — the
+   app records from the camera and LiDAR scanner and cannot function without it).
 3. Point at any object a metre or two away. The preview shows live depth.
 4. Optionally switch the output format between `.wurld.webm` (default) and
    `.r3d`.
