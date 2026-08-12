@@ -58,16 +58,15 @@ struct WelcomeView: View {
         .interactiveDismissDisabled(false)
     }
 
+    // Copy drafted with an LLM against the app's voice: plain, warm, no
+    // numbers-per-second, no formats, no tooling.
     private var intent: some View {
         WelcomePage(
             symbol: "cube.transparent",
-            title: "Capture in 3D",
+            title: "Capture the whole scene",
             lines: [
-                "WurldCam records what the camera sees together with the "
-                + "distance to every pixel and the camera's own position, "
-                + "thirty times a second.",
-                "One file holds it all. It plays like an ordinary video, and "
-                + "opens as a 3D point cloud in the wurld viewer or in Python.",
+                "WurldCam records colour, depth, and how you move in one take.",
+                "Revisit your moments later and explore them in 3D.",
             ])
     }
 
@@ -75,34 +74,30 @@ struct WelcomeView: View {
         WelcomePage(
             symbol: hasLiDAR ? "checkmark.circle" : "exclamationmark.triangle",
             symbolColor: hasLiDAR ? .green : .orange,
-            title: hasLiDAR ? "This device is ready" : "This device can't capture",
+            title: hasLiDAR ? "Your camera can do this" : "LiDAR not on this device",
             lines: hasLiDAR
                 ? [
-                    "The LiDAR scanner measures depth directly — no guessing "
-                    + "from parallax, no drift on blank walls.",
-                    "Depth is reliable from about half a metre out to five "
-                    + "metres. Beyond that the samples thin out.",
+                    "LiDAR on this device lets WurldCam see real depth as "
+                    + "you record.",
+                    "Later, walk around your capture, change your view, and "
+                    + "see your moment from new angles.",
                 ]
                 : [
-                    "Recording needs the LiDAR scanner, and this device does "
-                    + "not have one.",
-                    "It ships on the Pro iPhones (12 Pro and later) and on "
-                    + "iPad Pro from 2020 on. On this device the app can only "
-                    + "show this screen.",
+                    "WurldCam needs LiDAR to capture true depth with video.",
+                    "It works on iPhone Pro models since 12 Pro and iPad Pro "
+                    + "from 2020.",
                 ])
     }
 
     private var howTo: some View {
         WelcomePage(
             symbol: "figure.walk.motion",
-            title: "Move slowly, keep your distance",
+            title: "How to record in 3D",
             lines: [
-                "Tap the red button to record, again to stop. Walk around "
-                + "your subject slowly — fast turns blur both the image and "
-                + "the tracking.",
-                "Stay roughly one to three metres away. Recordings land in "
-                + "the Files app under WurldCam, and the share button sends "
-                + "the latest one anywhere.",
+                "Tap the red button, move slowly around your subject, stay "
+                + "1–3 metres away.",
+                "Find recordings in Files under WurldCam and share with the "
+                + "share button.",
             ])
     }
 }
