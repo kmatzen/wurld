@@ -50,6 +50,13 @@ test.beforeEach(async ({ page }) => {
   await page.goto(LIVE);
 });
 
+test('a page whose codec failed to load says so instead of going quiet', async ({ page }) => {
+  await page.route('**/chromapakz.js', (r) => r.abort());
+  await page.goto(LIVE);
+  await expect(page.locator('#stats'))
+    .toContainText('failed to load its codec', { timeout: 10_000 });
+});
+
 test('idle until started', async ({ page }) => {
   await expect(page.locator('#start')).toBeEnabled();
   await expect(page.locator('#stop')).toBeDisabled();

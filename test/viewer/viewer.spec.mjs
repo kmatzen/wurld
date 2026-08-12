@@ -184,6 +184,34 @@ test('a stereo file offers a choice of stream', async ({ page }) => {
   expect(v.rgbPixels).toBeGreaterThan(0);
 });
 
+test('a page whose decoder failed to load says so', async ({ page }) => {
+  // Reported as "the file dialog is not working". A module script that fails to
+  // load takes every handler with it: the page renders normally, the buttons are
+  // all present, and clicking any of them does nothing — including the one that
+  // opens the file picker. The only trace is a console error nobody sees.
+  // Commonest causes are no `npm install` from a checkout, or the CDN blocked by
+  // an extension or proxy on the hosted copy.
+  await page.route('**/chromapakz.js', (r) => r.abort());
+  await page.goto(VIEWER);
+
+  const note = page.locator('#drop .small');
+  await expect(note).toContainText('failed to load its decoder', { timeout: 10_000 });
+
+  // And the symptom really is what was reported: the picker never opens.
+  let chooserOpened = false;
+  page.on('filechooser', () => { chooserOpened = true; });
+  await page.locator('#pick').click();
+  await page.waitForTimeout(500);
+  expect(chooserOpened, 'a dead page cannot open the picker — hence the message').toBe(false);
+});
+
+test('a healthy page shows no failure notice', async ({ page }) => {
+  // The guard must not cry wolf on a slow but working load.
+  await page.goto(VIEWER);
+  await page.waitForTimeout(2500);
+  await expect(page.locator('#drop .small')).not.toContainText('failed to load');
+});
+
 test('the drop overlay goes away once a file is open', async ({ page }) => {
   expect(await page.locator('#drop').isVisible()).toBe(true);
   await drop(page, V('v02_depth'));

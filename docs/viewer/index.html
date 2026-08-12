@@ -71,6 +71,30 @@
   <input id="file" type="file" accept=".webm" hidden>
 </div>
 
+<!-- A module script that fails to load takes every event handler down with it.
+     The page still renders — the buttons are all there — and clicking them does
+     nothing at all, which reads as "the file dialog is broken" rather than as a
+     load failure. The usual cause is the chromapakz import being unreachable:
+     no `npm install` when running from a checkout, or the CDN blocked by an
+     extension, a proxy, or simply being offline on the hosted copy.
+
+     This is a classic script on purpose: it has to survive whatever stops the
+     module. The module sets the flag as its last statement. -->
+<script>
+addEventListener('DOMContentLoaded', () => setTimeout(() => {
+  if (window.__wurldViewerReady) return;
+  const note = document.querySelector('#drop .small');
+  if (!note) return;
+  note.innerHTML =
+    '<b>This page failed to load its decoder.</b><br>' +
+    'The buttons below will not respond until it does.<br>' +
+    'Running from a checkout? <code>npm install</code> first. ' +
+    'On the hosted page, check whether an extension or proxy is blocking ' +
+    '<code>cdn.jsdelivr.net</code>. The browser console has the exact error.';
+  note.style.color = '#ff9d9d';
+}, 2000));
+</script>
+
 <script type="module">
 import { createDecoder, dequantizeInverseDepth } from 'https://cdn.jsdelivr.net/npm/chromapakz@0.9.1/src/chromapakz.js';
 import { ID, readWurldTags, unpackFrames as unpackBinaryFrames, unpackImu, resolvePoses, readSeekHead,
@@ -846,6 +870,11 @@ addEventListener('drop', async e => {
 // supports it and the file has a SeekHead; full download otherwise.
 const src = new URLSearchParams(location.search).get('src');
 if (src) loadRemote(src).catch(e => reportLoadFailure(src, e));
+
+// Last statement in the module: reaching it means the imports resolved and the
+// handlers above are attached. The guard near the top of the document watches
+// for this and explains itself if it never arrives.
+window.__wurldViewerReady = true;
 </script>
 </body>
 </html>
