@@ -98,7 +98,8 @@ addEventListener('DOMContentLoaded', () => setTimeout(() => {
 <script type="module">
 import { createDecoder, dequantizeInverseDepth } from 'https://cdn.jsdelivr.net/npm/chromapakz@0.9.1/src/chromapakz.js';
 import { ID, readWurldTags, unpackFrames as unpackBinaryFrames, unpackImu, resolvePoses, readSeekHead,
-         segmentBounds, segmentPayloadStart, collectTagsInRange, readCues, spliceFile }
+         segmentBounds, segmentPayloadStart, collectTagsInRange, readCues, spliceFile,
+         readVint, cat, FRAME_RECORD_SIZE }
   from './wurld.js';
 
 // ---------- tiny mat4 ----------
@@ -436,11 +437,23 @@ async function tryLazyLocal(file) {
   if (lazyParam === '0') return false;
 
   const PROBE = 8192;
+  const source = fileSource(file);
   let head = new Uint8Array(await file.slice(0, PROBE).arrayBuffer());
-  const seeks = readSeekHead(head);
-  const firstCluster = seeks?.[ID.CLUSTER];
-  // No SeekHead, or no Cues to index the clusters with: nothing to be lazy about.
-  if (!firstCluster || !seeks[ID.CUES]) return false;
+  const seeks = readSeekHead(head) || {};
+
+  // A batch file has a SeekHead pointing straight at the first Cluster and the
+  // Cues. A streamed one has neither — the writer cannot know either offset
+  // before it has written them — so walk the elements to find where the
+  // Clusters begin. Both cases end up with the same three facts below.
+  let scan = null;
+  let firstCluster = seeks[ID.CLUSTER];
+  if (!firstCluster || !seeks[ID.CUES]) {
+    let payloadStart;
+    try { payloadStart = segmentBounds(head).payloadStart; } catch { return false; }
+    scan = await scanSegment(source, payloadStart, file.size);
+    if (!scan || scan.clusters.length < 2) return false;
+    firstCluster = firstCluster ?? scan.clusters[0].offset;
+  }
 
   if (firstCluster > head.length) {
     head = new Uint8Array(await file.slice(0, firstCluster).arrayBuffer());
@@ -448,21 +461,59 @@ async function tryLazyLocal(file) {
   const headerBytes = head.subarray(0, firstCluster);
   const bounds = segmentBounds(headerBytes);
   const tags = collectTagsInRange(headerBytes, bounds.payloadStart, firstCluster);
-  const chroma = typeof tags.CHROMAPAKZ === 'string' ? JSON.parse(tags.CHROMAPAKZ) : {};
-  if (!(chroma.frames > 0)) return false;
-  if (lazyParam !== '1' && chroma.frames < AUTO_LAZY_FRAMES) return false;
-  // Poses live in the document in front of the Clusters. If this file keeps them
-  // in a trailing table instead, the head does not have them and reading the
-  // whole file is the honest thing to do.
-  if (!tags.WURLD) return false;
+  let chroma = typeof tags.CHROMAPAKZ === 'string' ? JSON.parse(tags.CHROMAPAKZ) : {};
+  if (!tags.WURLD) return false;        // no document in the head: read it whole
+
+  let index = null, read = firstCluster;
+  // A streaming writer cannot know the frame count when it writes the header, so
+  // it records null. The consolidated pose table at the end does know: one
+  // fixed-size record per frame. Recovered below for that case.
+  let frameCount = chroma.frames > 0 ? chroma.frames : 0;
+
+  if (scan) {
+    // Poses: SPEC §9 puts a consolidated WURLD_FRAMES table at the end of a
+    // finished recording, so one read of the last Tags gets every pose — and,
+    // being one fixed-size record per frame, the frame count with it. The
+    // interleaved WURLD_POSES chunks are the fallback for a take that was
+    // interrupted before the table was written.
+    const tail = scan.tagRanges.filter(([s]) => s > firstCluster);
+    for (const [s, e] of tail.reverse()) {
+      const buf = await source.readRange(s, e - 1);
+      read += buf.length;
+      const found = collectTagsInRange(buf, 0, buf.length);
+      if (found.WURLD_FRAMES) { tags.WURLD_FRAMES = found.WURLD_FRAMES; break; }
+      if (found.WURLD_POSES) {
+        tags.WURLD_POSES = tags.WURLD_POSES
+          ? cat([found.WURLD_POSES, tags.WURLD_POSES]) : found.WURLD_POSES;
+      }
+    }
+    const table = tags.WURLD_FRAMES ?? tags.WURLD_POSES;
+    if (!frameCount && table) frameCount = Math.floor(table.byteLength / FRAME_RECORD_SIZE);
+    if (!frameCount) return false;      // nothing says how long this file is
+
+    const fps = chroma.fps || 30;
+    const perCluster = Math.max(1, Math.round(frameCount / scan.clusters.length));
+    const starts = scan.clusters.map((c, k) => ({
+      // Timecodes are milliseconds of media time; without one, assume the
+      // writer's even cadence rather than refusing to index at all.
+      frame: c.timecodeMs != null ? Math.round(c.timecodeMs * fps / 1000)
+                                  : k * perCluster,
+      offset: c.offset, end: c.end,
+    }));
+    index = { starts, endOffset: scan.clusters[scan.clusters.length - 1].end };
+  }
+
+  if (!frameCount) return false;
+  if (lazyParam !== '1' && frameCount < AUTO_LAZY_FRAMES) return false;
+  chroma = { ...chroma, frames: frameCount };
 
   applyMetadata(tags,
-    `file: ${file.name} — poses from ${(firstCluster / 1024).toFixed(1)} KB of ` +
+    `file: ${file.name} — metadata from ${(read / 1024).toFixed(1)} KB of ` +
     `${(file.size / 1e6).toFixed(1)} MB; clusters decode on demand`);
   // The display track still plays in full: it is an ordinary WebM and the
   // element streams it from the blob itself.
   setVideoSource(URL.createObjectURL(file), true);
-  await setupLazy(fileSource(file), headerBytes, bounds, seeks, chroma, firstCluster);
+  await setupLazy(source, headerBytes, bounds, seeks, chroma, firstCluster, index);
   return true;
 }
 
@@ -790,14 +841,77 @@ const fileSource = (file) => ({
     new Uint8Array(await file.slice(start, end + 1).arrayBuffer()),
 });
 
-async function setupLazy(source, headerBytes, bounds, seeks, chroma, firstCluster) {
-  const cues = readCues(await source.readRange(seeks[ID.CUES], seeks[ID.CUES] + 65535));
+const TIMECODE = 0xE7;
+
+/**
+ * Rebuild a cluster index for a file that has no Cues, by walking top-level
+ * elements and stepping over their payloads.
+ *
+ * Everything the streaming writer produces lands here: SPEC §9 forbids Cues in
+ * the live layout, because interleaving pose tags moves the Clusters a Cue
+ * would point at. Those are exactly the files a phone records, so "no Cues"
+ * is the normal case for a capture, not an exotic one — and without an index
+ * the viewer had no choice but to read and decode the lot.
+ *
+ * An EBML element declares its own length, so the walk reads a few dozen bytes
+ * per element and jumps the rest. A five-minute take is a few hundred elements
+ * and a few hundred tiny reads, none of which touch a pixel.
+ */
+async function scanSegment(source, payloadStart, fileSize) {
+  const WIN = 64;                       // id + size + the cluster's Timecode child
+  const clusters = [], tagRanges = [];
+  let pos = payloadStart;
+  while (pos < fileSize) {
+    const win = await source.readRange(pos, Math.min(pos + WIN - 1, fileSize - 1));
+    if (win.length < 4) break;
+    let id, p, size, sizeLen;
+    try {
+      [id, p] = readVint(win, 0, true);
+      [size, p, sizeLen] = readVint(win, p, false);
+    } catch { break; }
+    // An unknown-size element (live streams use this for Segment) cannot be
+    // stepped over, so there is nothing to index.
+    if (size === Math.pow(2, 7 * sizeLen) - 1) return null;
+    const payload = pos + p, end = payload + size;
+    if (end > fileSize) break;          // truncated recording: keep what we have
+    if (id === ID.CLUSTER) {
+      let ms = null;
+      // Timecode is the Cluster's first child in everything that writes wurld.
+      try {
+        let q = p;
+        const [cid, after] = readVint(win, q, true);
+        if (cid === TIMECODE) {
+          const [len, valAt] = readVint(win, after, false);
+          let v = 0;
+          for (let i = 0; i < len; i++) v = v * 256 + win[valAt + i];
+          ms = v;
+        }
+      } catch { /* fall back to ordering below */ }
+      clusters.push({ offset: pos, end, timecodeMs: ms });
+    } else if (id === ID.TAGS) {
+      tagRanges.push([pos, end]);
+    }
+    pos = end;
+  }
+  return { clusters, tagRanges };
+}
+
+async function setupLazy(source, headerBytes, bounds, seeks, chroma, firstCluster, index) {
   const fps = chroma.fps, n = chroma.frames;
+  let starts, tail;
+  if (index) {
+    starts = index.starts;
+    tail = index.endOffset;
+  } else {
+    const cues = readCues(await source.readRange(seeks[ID.CUES], seeks[ID.CUES] + 65535));
+    starts = cues.map(c => ({ frame: Math.round(c.timeMs * fps / 1000),
+                              offset: bounds.payloadStart + c.pos }));
+    tail = seeks[ID.CUES];
+  }
   Object.assign(lazyState, {
     active: true, source, src: source.label, headerBytes, bounds, chroma,
-    cuesOffset: seeks[ID.CUES],
-    starts: cues.map(c => ({ frame: Math.round(c.timeMs * fps / 1000),
-                             offset: bounds.payloadStart + c.pos })),
+    cuesOffset: tail,
+    starts,
     loading: new Map(),  // cluster index -> Promise
     requests: 2,         // head + cues so far
   });
@@ -824,6 +938,10 @@ async function setupLazy(source, headerBytes, bounds, seeks, chroma, firstCluste
  * starting a second one.
  */
 async function prefetchClusters(generation) {
+  // `?prefetch=0` leaves the file strictly on demand. Useful for seeing what a
+  // load actually costs — with the prefetch running, a short recording is fully
+  // read moments after the first frame, which hides it.
+  if (new URLSearchParams(location.search).get('prefetch') === '0') return;
   for (const { frame } of lazyState.starts) {
     // A new file resets the generation; abandon the old one's work.
     if (!lazyState.active || lazyState.generation !== generation) return;
@@ -880,7 +998,11 @@ function startCluster(k) {
     lazyState.loading.set(k, (async () => {
       const { source, headerBytes, bounds, starts, cuesOffset, chroma } = lazyState;
       const start = starts[k].offset;
-      const end = (k + 1 < starts.length ? starts[k + 1].offset : cuesOffset) - 1;
+      // A scanned index knows each Cluster's true end. With Cues we only know
+      // where the next one begins — fine there, because a batch file puts
+      // nothing between Clusters, but a streamed file interleaves pose tags and
+      // those must not be swept into the slice.
+      const end = (starts[k].end ?? (k + 1 < starts.length ? starts[k + 1].offset : cuesOffset)) - 1;
       const cluster = await source.readRange(start, end);
       lazyState.requests++;
       const spliced = spliceFile(headerBytes, bounds.segStart,
