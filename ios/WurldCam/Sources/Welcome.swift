@@ -11,15 +11,22 @@ import SwiftUI
 /// has read what the recording is for instead of the instant the app opens.
 struct WelcomeView: View {
     var onDone: () -> Void
-    @State private var page = 0
+    // --simulate-no-lidar (simulator QA) opens directly on the device page so
+    // the incompatible-device variant can be seen without scripted swiping.
+    @State private var page =
+        ProcessInfo.processInfo.arguments.contains("--simulate-no-lidar") ? 1 : 0
 
-    /// The one capability the app cannot work without. Checked live rather than
-    /// assumed from the model name: `UIRequiredDeviceCapabilities` can only
-    /// require ARKit in general, so the App Store will happily install this on
-    /// a non-Pro iPhone that has no LiDAR.
+    /// The one capability the app cannot work without. Checked live via
+    /// ARKit — never assumed from the model name — because
+    /// `UIRequiredDeviceCapabilities` can only require ARKit in general, so
+    /// the App Store will happily install this on a non-Pro iPhone that has
+    /// no LiDAR. On devices this is always the real query. The simulator has
+    /// no camera, so the real query is always false there; screenshots want
+    /// the happy path, hence the default, and `--simulate-no-lidar` drops the
+    /// pretence to exercise the incompatible-device page.
     private var hasLiDAR: Bool {
         #if targetEnvironment(simulator)
-        true
+        !ProcessInfo.processInfo.arguments.contains("--simulate-no-lidar")
         #else
         ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
         #endif
@@ -58,15 +65,17 @@ struct WelcomeView: View {
         .interactiveDismissDisabled(false)
     }
 
-    // Copy drafted with an LLM against the app's voice: plain, warm, no
-    // numbers-per-second, no formats, no tooling.
+    // Copy drafted with an LLM against the app's voice: plain, warm, American
+    // English, no numbers-per-second, no formats, no tooling — and truthful
+    // about where exploration happens (later, elsewhere), because this app
+    // records; it does not itself replay captures from new angles.
     private var intent: some View {
         WelcomePage(
             symbol: "cube.transparent",
             title: "Capture the whole scene",
             lines: [
-                "WurldCam records colour, depth, and how you move in one take.",
-                "Revisit your moments later and explore them in 3D.",
+                "WurldCam records color, depth, and how you move in one take.",
+                "Later, explore your moments in 3D on your computer.",
             ])
     }
 
@@ -77,10 +86,10 @@ struct WelcomeView: View {
             title: hasLiDAR ? "Your camera can do this" : "LiDAR not on this device",
             lines: hasLiDAR
                 ? [
-                    "LiDAR on this device lets WurldCam see real depth as "
-                    + "you record.",
-                    "Later, walk around your capture, change your view, and "
-                    + "see your moment from new angles.",
+                    "LiDAR on this device lets WurldCam capture real depth "
+                    + "as you record.",
+                    "Later, view your captures in 3D on your computer from "
+                    + "new angles.",
                 ]
                 : [
                     "WurldCam needs LiDAR to capture true depth with video.",
@@ -95,7 +104,7 @@ struct WelcomeView: View {
             title: "How to record in 3D",
             lines: [
                 "Tap the red button, move slowly around your subject, stay "
-                + "1–3 metres away.",
+                + "1–3 meters away.",
                 "Find recordings in Files under WurldCam and share with the "
                 + "share button.",
             ])

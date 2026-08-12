@@ -106,7 +106,7 @@ confidence in one streamable file. Open standard, no cloud, no account.
 
 > WurldCam turns an iPhone Pro into a posed RGBD capture rig.
 >
-> Every recording contains the colour video, the LiDAR depth map, the camera's
+> Every recording contains the color video, the LiDAR depth map, the camera's
 > position and orientation for each frame, and per-pixel depth confidence —
 > written together into a single file as you record, not stitched together
 > afterwards. Depth is stored losslessly, so the millimetres your sensor
@@ -117,7 +117,7 @@ confidence in one streamable file. Open standard, no cloud, no account.
 > capture, photogrammetry research.
 >
 > • Records to the open wurld format (Matroska/WebM container) or Record3D .r3d
-> • Lossless 16-bit depth, per-frame poses in metres with quaternion rotations
+> • Lossless 16-bit depth, per-frame poses in meters with quaternion rotations
 > • Files stay on your device — no account, no cloud, no analytics
 > • Retrieve captures via the share sheet or the Files app
 > • Read them with the open-source Python and JavaScript tools
