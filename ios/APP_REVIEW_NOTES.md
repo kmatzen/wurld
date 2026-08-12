@@ -4,8 +4,11 @@ Paste items 2–7 into **App Store Connect → App Review Information → Notes*
 attach the screen recording for item 1. The same text serves future submissions;
 Apple asked for it to live in Notes permanently.
 
-Two things only you can supply are marked **[YOU]**. Everything else is drawn
-from the app as built.
+Build 4 (uploaded 2026-08-12) is the build to attach: it carries the first-run
+walkthrough, the device-check page, the launch screen, and the corrected
+purpose string. One thing only you can supply is marked **[YOU]** — the screen
+recording. Everything else below is final, drawn from the app as built and
+from real device testing.
 
 ---
 
@@ -34,21 +37,19 @@ anyone, and exactly one permission prompt, so the recording is short. Shot list:
 Do not cut the permission prompt — a reviewer looking for step 4 of their list
 ("prompts requesting access to sensitive data") needs to see it.
 
-## 2. Devices and OS versions tested — **[YOU]**
+## 2. Devices and OS versions tested
 
-Fill in the actual devices. Format Apple expects, for example:
+> Tested on iPhone 15 Pro (iOS 26.5.2). Recording, on-device file output, and
+> export were exercised end to end on this device: a real capture
+> (145 frames, LiDAR depth + confidence, full camera track) was recorded,
+> shared off the device, and validated bit-exactly with the desktop tooling.
+> Recording requires the LiDAR scanner, which ships on iPhone Pro models
+> (12 Pro and later) and iPad Pro (2020 and later); on other devices the app
+> explains this on its device-check page rather than failing silently.
 
-> Tested on iPhone 15 Pro (iOS 18.x) and iPad Pro 11-inch M4 (iPadOS 18.x).
-
-⚠️ **Read this before answering.** `ios/README.md` records that ARKit on real
-hardware is the one link never exercised — the pipeline is verified on macOS via
-`ios/scripts/verify-pipeline.sh`, not on a device. Apple reviews on physical
-hardware. If the app has not yet completed a real capture on a LiDAR iPhone,
-do that first: a 2.1 reply claiming device testing that has not happened will
-fail again, and more slowly. The app also requires LiDAR (`arkit` +
-`UIRequiredDeviceCapabilities`) and cannot run in the Simulator, so a reviewer
-on a non-Pro device would see nothing — say explicitly which models have the
-scanner.
+(That capture happened 2026-08-12 and validated clean — 145/145 posed frames,
+unit quaternions, metric depth. The old warning about hardware never being
+exercised is obsolete and removed.)
 
 ## 3. Purpose and target audience
 
