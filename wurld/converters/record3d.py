@@ -88,6 +88,13 @@ def from_record3d(
         poses = meta.get("poses", [])
         timestamps = meta.get("frameTimestamps", [])
         fps = float(meta.get("fps", 30))
+        # Record3D stores ARKit's device uptime, so a phone awake for days starts a
+        # take at t≈330000 s. SPEC §3 permits any epoch, but nothing downstream wants
+        # one: it prints as nonsense and anything reading t as an offset into the
+        # media has to work the origin out for itself. Rebasing to the first frame
+        # leaves every interval identical. The .r3d itself is untouched — that file
+        # is Record3D's format and keeps Record3D's convention.
+        t0 = float(timestamps[0]) if timestamps else 0.0
 
         if at == "depth" and has_depth:
             W, H = dw, dh
@@ -122,7 +129,7 @@ def from_record3d(
                         conf = np.zeros((n_frames, H, W), dtype=np.uint16)
                     conf[i] = c
 
-            t = float(timestamps[i]) if i < len(timestamps) else i / fps
+            t = float(timestamps[i]) - t0 if i < len(timestamps) else i / fps
             if i < len(poses):
                 qx, qy, qz, qw, tx, ty, tz = (float(v) for v in poses[i])
                 c2w_gl = conventions.pose_to_matrix((qw, qx, qy, qz), (tx, ty, tz))

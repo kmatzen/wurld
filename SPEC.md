@@ -141,6 +141,13 @@ One entry per video frame, in presentation order. Fields:
 
 - `i` (int, required): frame index into the video/signal tracks.
 - `t` (float64, required): sensor timestamp, seconds. Monotonic non-decreasing.
+  The epoch is arbitrary, so a reader MUST NOT assume one — but writers SHOULD
+  make `t` of the first frame zero, or close to it. Sensor clocks are often
+  device uptime: an iPhone awake for four days starts a recording at
+  `t ≈ 330000`, which is valid, prints as nonsense, and forces anything treating
+  `t` as an offset into the media to recover the origin itself. Only differences
+  ever carry meaning, so rebasing costs nothing. Existing files with another
+  epoch remain valid and MUST still be read.
 - `camera` (string, required): key into `cameras`.
 - `q_wxyz`, `tr` (required unless `pose_valid` is false): camera-to-world rotation and
   translation.
