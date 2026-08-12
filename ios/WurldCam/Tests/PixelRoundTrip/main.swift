@@ -1,12 +1,12 @@
 // Standalone round-trip check for PixelConvert.swift. Builds with plain swiftc
 // on macOS (Accelerate + CoreVideo + CoreGraphics, no ARKit, no chromapakz), so
-// CI gets a fast signal on the vImage colour path that the app build can't give
+// CI gets a fast signal on the vImage color path that the app build can't give
 // cheaply.
 //
 //   swiftc -O ../../Sources/PixelConvert.swift main.swift -o roundtrip && ./roundtrip
 //
-// sRGB RGBA -> tagged 4:2:0 (YCbCr420.make) -> colour-managed sRGB RGBA
-// (PixelConverter). Solid colour blocks, interiors compared, so the only
+// sRGB RGBA -> tagged 4:2:0 (YCbCr420.make) -> color-managed sRGB RGBA
+// (PixelConverter). Solid color blocks, interiors compared, so the only
 // expected loss is chroma subsampling + rounding — a channel swap, wrong matrix,
 // or wrong range would blow past the tolerance.
 

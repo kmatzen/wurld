@@ -3,7 +3,7 @@ import CoreGraphics
 import CoreVideo
 import Foundation
 
-/// CPU colour conversions shared by the capture path and the simulator, kept
+/// CPU color conversions shared by the capture path and the simulator, kept
 /// free of ARKit so they compile and unit-test on macOS without a device.
 ///
 /// The device path converts the camera's YpCbCr (4:2:0 biplanar) buffer into
@@ -12,10 +12,10 @@ import Foundation
 /// No Core Image filter graph and no synchronous GPU->CPU readback — the step
 /// that made the write chain miss frames.
 ///
-/// This applies the colour *matrix* but not a primaries/transfer gamut remap, so
+/// This applies the color *matrix* but not a primaries/transfer gamut remap, so
 /// the result is the camera's own R'G'B' treated as sRGB. That matches ARKit's
 /// capture (BT.709 / sRGB-compatible) and the simulator's tagging; a wide-gamut
-/// (Display P3) source would need the fuller colour-managed path.
+/// (Display P3) source would need the fuller color-managed path.
 final class PixelConverter {
     enum ConvertError: Error {
         case unsupportedFormat(OSType)
@@ -30,7 +30,7 @@ final class PixelConverter {
     /// write queue, one frame at a time (`maxInFlight == 1`), so no locking.
     private var info = vImage_YpCbCrToARGB()
     /// The (range, matrix) the cached conversion was generated for. A conversion
-    /// built for one tagging silently produces wrong colour for another, so key
+    /// built for one tagging silently produces wrong color for another, so key
     /// the cache on both rather than on "have we generated once".
     private var generatedFor: (fullRange: Bool, matrix709: Bool)?
     private var full = vImage_Buffer()
@@ -124,8 +124,8 @@ final class PixelConverter {
 
 /// Pack an sRGB RGBA image into a 4:2:0 full-range biplanar `CVPixelBuffer` that
 /// looks, to the capture path, exactly like an ARKit camera frame — including the
-/// colour attachments, so `PixelConverter` reads real tags and round-trips the
-/// colour back to sRGB. Used only by the simulator; the maths is a plain BT.709
+/// color attachments, so `PixelConverter` reads real tags and round-trips the
+/// color back to sRGB. Used only by the simulator; the math is a plain BT.709
 /// full-range encode (the grid is tiny, so a straightforward loop is fine).
 enum YCbCr420 {
     static func make(fromSRGBA rgba: [UInt8], width: Int, height: Int) -> CVPixelBuffer? {
@@ -137,8 +137,8 @@ enum YCbCr420 {
                                   attrs, &pb) == kCVReturnSuccess,
               let pb else { return nil }
 
-        // Tag the colour so vImage's CV format picks it up on the way back: the
-        // BT.709 matrix for the YpCbCr<->RGB step, and an explicit sRGB colour
+        // Tag the color so vImage's CV format picks it up on the way back: the
+        // BT.709 matrix for the YpCbCr<->RGB step, and an explicit sRGB color
         // space for the RGB gamut/transfer. The samples were encoded straight
         // from sRGB values, so sRGB source -> sRGB dest makes the transfer step
         // an identity and the round-trip loses only chroma subsampling.

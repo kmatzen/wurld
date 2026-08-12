@@ -44,7 +44,7 @@ struct ContentView: View {
                             .padding(10)
                             .background(.black.opacity(0.55), in: Circle())
                     }
-                    .accessibilityLabel("About and licences")
+                    .accessibilityLabel("About and licenses")
                 }
                 .padding(.horizontal, 20)
                 Spacer()

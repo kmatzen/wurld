@@ -27,7 +27,7 @@ anyone, and exactly one permission prompt, so the recording is short. Shot list:
 5. Choose the output format (`.wurld.webm` default, or `.r3d`).
 6. Tap record, walk around an object for ~10 seconds, tap stop.
 7. The finished take appears in the on-device list with its duration and size.
-8. Open the ⓘ button to show the licence acknowledgements.
+8. Open the ⓘ button to show the license acknowledgements.
 9. Open the **Files** app → On My iPhone → WurldCam, showing the recording is a
    normal file the user owns and can copy off the device.
 
@@ -57,11 +57,11 @@ scanner. It records what the camera sees together with the depth of every pixel
 and the position the camera was in for each frame, and writes them into a single
 file the user can copy off the device.
 
-**Problem it solves.** An ordinary video records colour only, so the geometry of
+**Problem it solves.** An ordinary video records color only, so the geometry of
 the scene is lost. Recovering it afterwards requires photogrammetry, which is
 slow and often fails on plain or reflective surfaces. The LiDAR scanner already
 measures that geometry directly, but there is no simple way to save it with the
-video in one file that other tools accept. WurldCam writes the colour, the
+video in one file that other tools accept. WurldCam writes the color, the
 metric depth and the camera track together, so the capture arrives complete.
 
 **Value.** One tap produces a file that opens both as an ordinary video — the
@@ -85,7 +85,7 @@ Complete flow:
    It can be skipped, and reopened any time from the ? button.
 2. Allow camera access when prompted as the walkthrough closes (required — the
    app records from the camera and LiDAR scanner and cannot function without it).
-3. Point at any object a metre or two away. The preview shows live depth.
+3. Point at any object a meter or two away. The preview shows live depth.
 4. Optionally switch the output format between `.wurld.webm` (default) and
    `.r3d`.
 5. Tap record; move slowly around the subject; tap stop.
@@ -110,7 +110,7 @@ two statically linked open-source libraries compiled into the binary:
 - **libvpx** (BSD-3-Clause) — VP9 video encoding.
 - **chromapakz** (MIT) — packs the depth data losslessly into the video file.
 
-Both licences are reproduced in the app under the ⓘ button, which also satisfies
+Both licenses are reproduced in the app under the ⓘ button, which also satisfies
 the binary-distribution notice requirement. No third party receives any data,
 because nothing leaves the device.
 
@@ -131,7 +131,7 @@ includes no protected third-party material. It records only content the user
 creates with their own device's camera.
 
 The sole third-party components are the two open-source libraries in item 5,
-both under permissive licences (BSD-3-Clause and MIT) that allow binary
+both under permissive licenses (BSD-3-Clause and MIT) that allow binary
 redistribution with attribution; that attribution is included in the app.
 
 ---
@@ -145,7 +145,7 @@ camera and LiDAR", which restates the permission in jargon and gives no example.
 It now reads:
 
 > WurldCam uses the camera and LiDAR scanner to record a 3D capture. Each
-> frame's colour image, per-pixel depth and camera position are written to a
+> frame's color image, per-pixel depth and camera position are written to a
 > file on this device — for example, walking around a chair records a short clip
 > you can open on a computer and view in 3D. Recordings stay on this device and
 > are never uploaded.

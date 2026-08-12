@@ -129,7 +129,7 @@ final class SimulatedSensor {
 /// same encode path as ARKit's, rather than a parallel one that could drift.
 extension SimulatedSensor {
     /// A 4:2:0 full-range biplanar buffer, tagged BT.709, matching the format
-    /// and colour attachments of an ARKit camera frame so the capture path's
+    /// and color attachments of an ARKit camera frame so the capture path's
     /// `PixelConverter` handles it identically — no simulator-only branch.
     static func makeYCbCr420(fromSRGBA rgba: [UInt8], width: Int, height: Int) -> CVPixelBuffer? {
         YCbCr420.make(fromSRGBA: rgba, width: width, height: height)
