@@ -12,6 +12,13 @@ struct ContentView: View {
     @StateObject private var capture = CaptureController()
     @State private var sharing = false
     @State private var showingAbout = false
+    // First-run walkthrough. The flag persists so it appears exactly once; the
+    // ? button reopens it on demand. While the sheet is up the camera has not
+    // been started, so the permission prompt arrives after the user has read
+    // what the recording is for — not the instant the app opens.
+    @AppStorage("hasSeenWelcome") private var hasSeenWelcome = false
+    @State private var showingWelcome = false
+    @State private var cameraStarted = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -24,6 +31,13 @@ struct ContentView: View {
             VStack {
                 HStack {
                     Spacer()
+                    Button { showingWelcome = true } label: {
+                        Image(systemName: "questionmark.circle")
+                            .font(.title3)
+                            .padding(10)
+                            .background(.black.opacity(0.55), in: Circle())
+                    }
+                    .accessibilityLabel("How to capture")
                     Button { showingAbout = true } label: {
                         Image(systemName: "info.circle")
                             .font(.title3)
@@ -80,16 +94,23 @@ struct ContentView: View {
             .foregroundStyle(.white)
         }
         .onAppear {
-            capture.start()
             #if targetEnvironment(simulator)
             // Screenshot automation: --simulate-recording drops straight into the
-            // recording state so the capture UI can be captured unattended.
+            // recording state so the capture UI can be captured unattended. It
+            // must not sit behind the welcome sheet.
             if ProcessInfo.processInfo.arguments.contains("--simulate-recording") {
+                startCameraOnce()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     capture.beginRecording()
                 }
+                return
             }
             #endif
+            if hasSeenWelcome {
+                startCameraOnce()
+            } else {
+                showingWelcome = true
+            }
         }
         .sheet(isPresented: $sharing) {
             if let url = capture.lastCaptureURL {
@@ -97,6 +118,21 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showingAbout) { AcknowledgementsView() }
+        .sheet(isPresented: $showingWelcome, onDismiss: {
+            // Swiping the sheet away counts as done: the walkthrough must never
+            // be able to trap the app. Reopening from ? later must not restart
+            // the session, hence the once-guard.
+            hasSeenWelcome = true
+            startCameraOnce()
+        }) {
+            WelcomeView { showingWelcome = false }
+        }
+    }
+
+    private func startCameraOnce() {
+        guard !cameraStarted else { return }
+        cameraStarted = true
+        capture.start()
     }
 }
 

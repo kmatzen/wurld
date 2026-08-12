@@ -44,6 +44,17 @@ open WurldCam.xcodeproj   # set your signing team, run on a LiDAR device
 Requires an iPhone/iPad with LiDAR (Pro models). Not testable in the simulator
 (no ARKit camera).
 
+First launch shows a three-page walkthrough (`Sources/Welcome.swift`): intent,
+a live LiDAR check — the App Store will install the app on non-Pro devices,
+since `UIRequiredDeviceCapabilities` can only demand ARKit in general — and
+capture technique. Shown once, skippable, reopenable from the ? button; the
+camera (and so the permission prompt) starts only after it closes. The launch
+screen is full-bleed generated art — a living room as a luminous point cloud,
+the thing the app produces (`LaunchScreen.storyboard` aspect-filling
+`Assets.xcassets/LaunchArt`); `OPENAI_API_KEY=… scripts/make-launch-art.sh`
+redraws it. iOS caches launch screens hard: delete the app once if old art
+keeps appearing.
+
 To put a build on a connected phone without opening Xcode:
 
 ```sh
