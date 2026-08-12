@@ -191,6 +191,7 @@ function forgetPreviousFile() {
   state.camera = null;
   state.depthMap = null;
   lazyState.active = false;
+  lazyState.generation++;
   lazyState.loading?.clear();
   const scrub = document.getElementById('scrub');
   scrub.value = 0; scrub.max = 0;
@@ -399,6 +400,72 @@ function reportLoadFailure(name, err) {
   refreshExports();
 }
 
+/**
+ * Open a local file, reading as little of it as the layout allows.
+ *
+ * A batch-written wurld file puts the whole WURLD document — calibration and
+ * every pose — in front of the first Cluster, and its Cues at the end. That is
+ * the property the remote path already exploits, and it holds just as well for
+ * a file on disk: a 2.6 MB, 300-frame capture keeps everything but pixels in
+ * its first 28 KB. Reading only that, then decoding clusters as the user
+ * actually reaches them, replaces fifteen seconds of eager decoding with two
+ * small slices.
+ *
+ * Files without Cues — anything the streaming writer produced, where Cues would
+ * be stale by construction (SPEC §9) — cannot be indexed, so they fall back to
+ * reading the whole file. Correct either way; only the cost differs.
+ */
+async function loadFile(file) {
+  try {
+    if (!(await tryLazyLocal(file))) {
+      await decodeInto(new Uint8Array(await file.arrayBuffer()), file.name);
+    }
+  } catch (err) {
+    reportLoadFailure(file.name, err);
+  }
+}
+
+// Decoding a frame costs far more than reading its bytes off disk, so the
+// threshold is in frames rather than bytes — unlike the remote path, where the
+// download dominates. Around 50 ms a frame, this is a second of work saved
+// before it is worth paying a slice per scrub. `?lazy=1`/`0` forces either way.
+const AUTO_LAZY_FRAMES = 24;
+
+async function tryLazyLocal(file) {
+  const lazyParam = new URLSearchParams(location.search).get('lazy');
+  if (lazyParam === '0') return false;
+
+  const PROBE = 8192;
+  let head = new Uint8Array(await file.slice(0, PROBE).arrayBuffer());
+  const seeks = readSeekHead(head);
+  const firstCluster = seeks?.[ID.CLUSTER];
+  // No SeekHead, or no Cues to index the clusters with: nothing to be lazy about.
+  if (!firstCluster || !seeks[ID.CUES]) return false;
+
+  if (firstCluster > head.length) {
+    head = new Uint8Array(await file.slice(0, firstCluster).arrayBuffer());
+  }
+  const headerBytes = head.subarray(0, firstCluster);
+  const bounds = segmentBounds(headerBytes);
+  const tags = collectTagsInRange(headerBytes, bounds.payloadStart, firstCluster);
+  const chroma = typeof tags.CHROMAPAKZ === 'string' ? JSON.parse(tags.CHROMAPAKZ) : {};
+  if (!(chroma.frames > 0)) return false;
+  if (lazyParam !== '1' && chroma.frames < AUTO_LAZY_FRAMES) return false;
+  // Poses live in the document in front of the Clusters. If this file keeps them
+  // in a trailing table instead, the head does not have them and reading the
+  // whole file is the honest thing to do.
+  if (!tags.WURLD) return false;
+
+  applyMetadata(tags,
+    `file: ${file.name} — poses from ${(firstCluster / 1024).toFixed(1)} KB of ` +
+    `${(file.size / 1e6).toFixed(1)} MB; clusters decode on demand`);
+  // The display track still plays in full: it is an ordinary WebM and the
+  // element streams it from the blob itself.
+  setVideoSource(URL.createObjectURL(file), true);
+  await setupLazy(fileSource(file), headerBytes, bounds, seeks, chroma, firstCluster);
+  return true;
+}
+
 async function loadBytes(bytes, name) {
   try {
     await decodeInto(bytes, name);
@@ -454,7 +521,7 @@ async function loadRemote(src) {
   const lazy = wantLazy && seeks[ID.CUES] && chroma.frames > 0;
   if (lazy) {
     applyMetadata(tags, `lazy: ${src} — poses from ${(fetched / 1024).toFixed(1)} KB; clusters fetch on demand`);
-    return setupLazy(src, headerBytes, bounds, seeks, chroma, firstCluster);
+    return setupLazy(httpSource(src), headerBytes, bounds, seeks, chroma, firstCluster);
   }
   applyMetadata(tags, `ranged: ${src} — all poses from ${(fetched / 1024).toFixed(1)} KB, streaming video…`);
 
@@ -693,16 +760,41 @@ function drawPanes(i) {
 }
 
 // ---------- lazy cluster access ----------
-const lazyState = { active: false };
+// `generation` invalidates a background prefetch when a new file is opened;
+// without it the old file's clusters would keep decoding into the new one's
+// frame array.
+const lazyState = { active: false, generation: 0, foreground: 0, wanted: null };
 
-async function setupLazy(src, headerBytes, bounds, seeks, chroma, firstCluster) {
-  const cuesResp = await fetch(src, {
-    cache: 'no-store', headers: { Range: `bytes=${seeks[ID.CUES]}-${seeks[ID.CUES] + 65535}` },
-  });
-  const cues = readCues(new Uint8Array(await cuesResp.arrayBuffer()));
+/**
+ * A byte source the lazy path can read ranges from.
+ *
+ * The only thing that ever tied cluster-on-demand decoding to the network was
+ * the range request. A local File answers ranges too, through slice(), and
+ * reading a slice does not pull the rest of the file into memory — so the same
+ * machinery works for a dropped file with no change beyond this indirection.
+ * `end` is inclusive, matching the HTTP Range it replaces.
+ */
+const httpSource = (src) => ({
+  label: src,
+  media: src,                       // <video> can stream this itself
+  readRange: async (start, end) => {
+    const r = await fetch(src, { cache: 'no-store', headers: { Range: `bytes=${start}-${end}` } });
+    return new Uint8Array(await r.arrayBuffer());
+  },
+});
+
+const fileSource = (file) => ({
+  label: file.name,
+  media: null,                      // supplied separately as a blob URL
+  readRange: async (start, end) =>
+    new Uint8Array(await file.slice(start, end + 1).arrayBuffer()),
+});
+
+async function setupLazy(source, headerBytes, bounds, seeks, chroma, firstCluster) {
+  const cues = readCues(await source.readRange(seeks[ID.CUES], seeks[ID.CUES] + 65535));
   const fps = chroma.fps, n = chroma.frames;
   Object.assign(lazyState, {
-    active: true, src, headerBytes, bounds, chroma,
+    active: true, source, src: source.label, headerBytes, bounds, chroma,
     cuesOffset: seeks[ID.CUES],
     starts: cues.map(c => ({ frame: Math.round(c.timeMs * fps / 1000),
                              offset: bounds.payloadStart + c.pos })),
@@ -712,8 +804,39 @@ async function setupLazy(src, headerBytes, bounds, seeks, chroma, firstCluster) 
   state.W = chroma.width; state.H = chroma.height;
   state.frames = new Array(n).fill(null);
   document.getElementById('scrub').max = n - 1;
-  setVideoSource(src, false);
+  if (source.media) setVideoSource(source.media, false);
   setFrame(0);
+  prefetchClusters(lazyState.generation);
+}
+
+/**
+ * Keep decoding in the background once the first frame is up.
+ *
+ * Lazy alone trades one long wait for many short ones: opening is immediate,
+ * but every jump into undecoded territory costs a cluster decode — about a
+ * second for a one-second cluster. Filling the rest in behind the user removes
+ * that without giving back the fast open, and it is what the layout is for:
+ * the file is a sequence of independently decodable clusters, so there is no
+ * reason to sit idle after the first.
+ *
+ * Yields between clusters so scrubbing stays responsive, and ensureFrame's own
+ * in-flight map means a user jump joins the decode already running rather than
+ * starting a second one.
+ */
+async function prefetchClusters(generation) {
+  for (const { frame } of lazyState.starts) {
+    // A new file resets the generation; abandon the old one's work.
+    if (!lazyState.active || lazyState.generation !== generation) return;
+    if (state.frames[frame]) continue;               // already decoded
+    // Stand aside while the user is waiting on a frame: two decodes at once
+    // just makes the one somebody is looking at slower.
+    while (lazyState.foreground > 0) {
+      if (!lazyState.active || lazyState.generation !== generation) return;
+      await new Promise(r => setTimeout(r, 30));
+    }
+    try { await ensureFrame(frame); } catch { return; }
+    await new Promise(r => setTimeout(r, 0));
+  }
 }
 
 function lazyClusterOf(i) {
@@ -722,16 +845,44 @@ function lazyClusterOf(i) {
   return k;
 }
 
+/**
+ * Wait for one frame, not for the cluster that carries it.
+ *
+ * A cluster holds a second of video, so decoding all of it before drawing
+ * anything costs about a second — and the frame the user asked for is usually
+ * decoded long before the last one. Resolving as soon as *that* frame lands cuts
+ * the wait to however far into the cluster it sits, while the rest keeps
+ * decoding behind it. Frame at the cluster boundary: near-immediate. Worst case
+ * (the last frame of a cluster) is what waiting for the whole thing always cost.
+ */
 async function ensureFrame(i) {
   const k = lazyClusterOf(i);
+  // Tell any background decode already running which cluster is actually wanted,
+  // so it can step aside mid-cluster. Stopping the prefetch from *starting* work
+  // is not enough: one already in flight holds the only thread for a second.
+  lazyState.wanted = k;
+  startCluster(k);
+  const done = lazyState.loading.get(k);
+  let settled = false;
+  done.then(() => { settled = true; }, () => { settled = true; });
+  try {
+    while (!state.frames[i] && !settled) await new Promise(r => setTimeout(r, 5));
+  } finally {
+    if (lazyState.wanted === k) lazyState.wanted = null;   // let the prefetch resume
+  }
+  if (!state.frames[i]) await done;   // surface a decode failure rather than hang
+  showMeta(`lazy: ${lazyState.src} — ${lazyState.requests} range reads, ` +
+           `${state.frames.filter(Boolean).length}/${state.frames.length} frames cached`);
+}
+
+function startCluster(k) {
   if (!lazyState.loading.has(k)) {
     lazyState.loading.set(k, (async () => {
-      const { src, headerBytes, bounds, starts, cuesOffset, chroma } = lazyState;
+      const { source, headerBytes, bounds, starts, cuesOffset, chroma } = lazyState;
       const start = starts[k].offset;
       const end = (k + 1 < starts.length ? starts[k + 1].offset : cuesOffset) - 1;
-      const resp = await fetch(src, { cache: 'no-store', headers: { Range: `bytes=${start}-${end}` } });
+      const cluster = await source.readRange(start, end);
       lazyState.requests++;
-      const cluster = new Uint8Array(await resp.arrayBuffer());
       const spliced = spliceFile(headerBytes, bounds.segStart,
                                  [headerBytes.subarray(bounds.payloadStart), cluster]);
       const dec = createDecoder(spliced);
@@ -749,13 +900,17 @@ async function ensureFrame(i) {
         }
         state.frames[first + j] = rec;
         j++;
+        // Yield the thread while a *different* cluster is being waited on. Only
+        // a different one: pausing for the cluster we are ourselves producing
+        // would wait for frames nobody else is going to decode.
+        while (lazyState.wanted !== null && lazyState.wanted !== k) {
+          await new Promise(r => setTimeout(r, 0));
+        }
       }
       dec.close();
     })());
   }
-  await lazyState.loading.get(k);
-  showMeta(`lazy: ${lazyState.src} — ${lazyState.requests} ranged requests, ` +
-           `${state.frames.filter(Boolean).length}/${state.frames.length} frames cached`);
+  return lazyState.loading.get(k);
 }
 
 // ---------- frame control ----------
@@ -768,7 +923,11 @@ function setFrame(i) {
   document.getElementById('frameinfo').textContent =
     `frame ${i + 1}/${state.frames.length}${t}` + (missing ? ' (fetching…)' : '');
   if (missing) {
-    ensureFrame(i).then(() => { if (state.cur === i) setFrame(i); })
+    // Foreground: the user is waiting on this frame. Counted so the background
+    // prefetch stands aside rather than racing it for the decoder.
+    lazyState.foreground++;
+    ensureFrame(i).finally(() => { lazyState.foreground--; })
+      .then(() => { if (state.cur === i) setFrame(i); })
       .catch(e => console.error('ensureFrame', e));
     return;
   }
@@ -857,13 +1016,15 @@ fileInput.onchange = async () => {
   // Clearing the input means picking the same path twice still fires a change
   // event — the obvious move after re-exporting a file you are iterating on.
   fileInput.value = '';
-  if (f) loadBytes(new Uint8Array(await f.arrayBuffer()), f.name);
+  // Hand over the File itself rather than its bytes: loadFile decides how much
+  // of it to read, and for an indexable capture that is a few tens of KB.
+  if (f) loadFile(f);
 };
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', async e => {
   e.preventDefault();
   const f = e.dataTransfer.files[0];
-  if (f) loadBytes(new Uint8Array(await f.arrayBuffer()), f.name);
+  if (f) loadFile(f);
 });
 
 // ?src= auto-load (relative to this page): ranged/progressive when the server

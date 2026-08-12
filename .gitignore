@@ -25,6 +25,10 @@ ios/.native-build/
 # The conformance corpus is the shared definition of correct across the
 # Python, JS and C++ readers, so the vectors must be committed, not generated.
 !conformance/vectors/*.webm
+# Viewer test fixtures. Not conformance vectors: that corpus is generated from
+# intent and shipped to other implementations, whereas this one exists only
+# because the vectors are all single-cluster and cannot exercise lazy loading.
+!test/viewer/fixtures/*.webm
 
 # the pinned chromapakz clone build-native.sh makes
 ios/.native-build/
