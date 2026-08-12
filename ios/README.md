@@ -44,6 +44,20 @@ open WurldCam.xcodeproj   # set your signing team, run on a LiDAR device
 Requires an iPhone/iPad with LiDAR (Pro models). Not testable in the simulator
 (no ARKit camera).
 
+To put a build on a connected phone without opening Xcode:
+
+```sh
+ios/scripts/install-device.sh          # finds the paired device itself
+```
+
+Note this is **not** `archive.sh`. That produces an App Store build signed for
+distribution with `get-task-allow=false`, which a device refuses to install — it
+is for upload, not for running. `install-device.sh` builds Debug with an Apple
+Development identity, the only kind that sideloads, and checks that before it
+tries. The phone must be unlocked and either plugged in or reachable on the
+network; `xcrun devicectl list devices` shows `tunnelState`, and `disconnected`
+means the install fails with a connection reset however good the build is.
+
 ## Status
 
 Compiles against the iOS SDK; the recording pipeline (encoder, pose weaving,
