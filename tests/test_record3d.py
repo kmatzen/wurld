@@ -113,3 +113,43 @@ def test_record3d_float16_depth_variant(r3d_fixture, scene, tmp_path):
     ref = scene["depth_m"][0]
     both = ~np.isnan(dm) & ~np.isnan(ref)
     assert np.abs(dm[both] - ref[both]).max() < 0.1  # f16 + quantization
+
+
+def test_device_uptime_timestamps_are_rebased(tmp_path, r3d_fixture, scene):
+    """A real capture starts at ARKit's device uptime, not at zero.
+
+    Record3D stores the raw clock, so a phone awake for four days produces a take
+    whose first frame is at t≈330000 s — the shape of the first real WurldCam
+    recording. SPEC §3 allows any epoch and such a file is valid, but nothing
+    downstream wants one: it prints as nonsense, and a consumer treating t as an
+    offset into the media has to work the origin out for itself. Only differences
+    ever carry meaning, so the importer rebases to the first frame.
+
+    The .r3d is left exactly as Record3D writes it; the rebase happens on the way
+    into wurld.
+    """
+    import json
+    import zipfile
+
+    UPTIME = 330_973.252  # taken from an actual capture
+
+    shifted = tmp_path / "uptime.r3d"
+    with zipfile.ZipFile(r3d_fixture) as src, zipfile.ZipFile(shifted, "w") as dst:
+        for name in src.namelist():
+            data = src.read(name)
+            if name == "metadata":
+                meta = json.loads(data)
+                meta["frameTimestamps"] = [t + UPTIME for t in meta["frameTimestamps"]]
+                data = json.dumps(meta).encode()
+            dst.writestr(name, data)
+
+    out = tmp_path / "uptime.wurld.webm"
+    record3d.from_record3d(shifted, out)
+    seq = wl.read(out)
+
+    assert seq.frames[0].t == pytest.approx(0.0, abs=1e-9), "the take starts at zero"
+    # Every interval is untouched — rebasing must shift, never rescale.
+    want = [f.t - scene["frames"][0].t for f in scene["frames"]]
+    got = [f.t for f in seq.frames]
+    assert got == pytest.approx(want, abs=1e-6)
+    assert got == sorted(got), "still monotonic (SPEC §3)"

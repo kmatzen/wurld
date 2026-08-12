@@ -302,18 +302,24 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             ) { chunk in writer.weave(chunk) }
         }
 
-        // Pose first: pending poses flush ahead of the cluster holding this frame.
-        let pose = canonicalPose(index: UInt32(index), time: timestamp, arkitTransform: transform)
-        wlWriter?.addPose(pose)
-        // Cue times rebase to the media timeline: ARKit timestamps are device uptime,
-        // so an absolute cue would land far past the end of the video. The true value
-        // stays in the payload.
+        // ARKit stamps frames with device uptime, so a phone that has been awake a
+        // few days starts a recording at t≈330000 s. SPEC §3 allows any epoch as
+        // long as it is monotonic, so such a file is valid — but nothing downstream
+        // wants it: a viewer prints "t=330973.252s", and anything treating t as an
+        // offset into the media has to discover the origin for itself. Recording
+        // seconds since the first frame keeps every interval identical and costs
+        // nothing, and it is what the cue timeline already had to do.
         if wlFirstTimestamp == nil { wlFirstTimestamp = timestamp }
+        let t = timestamp - (wlFirstTimestamp ?? timestamp)
+
+        // Pose first: pending poses flush ahead of the cluster holding this frame.
+        let pose = canonicalPose(index: UInt32(index), time: t, arkitTransform: transform)
+        wlWriter?.addPose(pose)
         let q = pose.qWXYZ, tr = pose.translation
         try? wlEncoder?.addText(
-            "i=\(index) t=\(timestamp) camera=0 "
+            "i=\(index) t=\(t) camera=0 "
             + "q_wxyz=\(q.x),\(q.y),\(q.z),\(q.w) tr=\(tr.x),\(tr.y),\(tr.z)",
-            timestamp: max(0, timestamp - (wlFirstTimestamp ?? timestamp)),
+            timestamp: max(0, t),
             duration: frameInterval)
 
         let rgba = try pixelConverter.sRGBA(from: image, width: dw, height: dh)
