@@ -41,6 +41,22 @@
   </div>
 </div>
 
+<!-- Same guard as the main viewer: if the module fails to load, Start and Stop
+     are inert buttons on an otherwise normal-looking page. A classic script, so
+     it survives whatever stopped the module. -->
+<script>
+addEventListener('DOMContentLoaded', () => setTimeout(() => {
+  if (window.__wurldLiveReady) return;
+  const el = document.getElementById('stats');
+  if (!el) return;
+  el.textContent =
+    'This page failed to load its codec, so Start will not respond.\n' +
+    'From a checkout: run npm install. On the hosted page: check whether an\n' +
+    'extension or proxy is blocking cdn.jsdelivr.net. The console has the error.';
+  el.style.color = '#ff9d9d';
+}, 2000));
+</script>
+
 <script type="module">
 import { createDecoder, createEncoder } from '../node_modules/chromapakz/src/chromapakz.js';
 import { WurldRecorder, WurldLivePlayer, readWurldTags, unpackFrames, cat }
@@ -340,6 +356,9 @@ function quatToMat(q) {
           2*(x*y+w*z), 1-2*(x*x+z*z), 2*(y*z-w*x),
           2*(x*z-w*y), 2*(y*z+w*x), 1-2*(x*x+y*y)];
 }
+
+// Last statement in the module: the guard above watches for it.
+window.__wurldLiveReady = true;
 </script>
 </body>
 </html>
