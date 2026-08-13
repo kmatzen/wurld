@@ -345,7 +345,11 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             // equal pairs keep the output byte-identical to the pre-v4 form.
             wlEncoder = try ChromapakzStreamEncoder(
                 width: rw, height: rh, fps: Int(round(1.0 / frameInterval)),
-                rgbKbps: 2000, near: wlNear, far: wlFar, includeConfidence: true,
+                // 6000 kbps, not 2000: chromapakz 0.11.0 streams with the realtime encoder
+                // profile, where quality is a bitrate question — at 6000 the realtime path
+                // measures 39.2 dB, above the old good-quality baseline's 38.6, at 3x the
+                // speed. ~0.75 MB/s of video beside ~1.2 MB/s of lossless depth.
+                rgbKbps: 6000, near: wlNear, far: wlFar, includeConfidence: true,
                 depthWidth: dw, depthHeight: dh,
                 // Poses also go out as WebVTT cues so a capture that never touches a
                 // desktop is still readable by plain ffmpeg. The binary table written
