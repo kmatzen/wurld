@@ -273,11 +273,15 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         guard isRecording, let sceneDepth = frame.sceneDepth else { return }
-        // Pace against the take's target, minus half a sensor tick: ARKit frames
-        // arrive on a ~33 ms grid, so comparing against the full interval makes a
-        // frame that lands a hair early miss the gate and stretch the gap to two
-        // ticks. The half-tick allowance keeps 15 fps meaning every-other-frame.
-        if frame.timestamp - lastFrameTime < takeInterval - (frameInterval / 2) { return }
+        // Pace against the take's target minus a small allowance, so a frame
+        // that lands a hair early still passes rather than stretching the gap a
+        // whole delivery tick. The allowance must stay below the *shortest* tick
+        // ARKit uses: this device delivers at 60 Hz (16.7 ms), and an earlier
+        // half-of-33ms margin (25 ms) let the +50 ms frame through — measured as
+        // a 50 ms cadence, 19.3 fps, instead of the intended even 66.7 ms. A
+        // quarter of 33 ms (8.3 ms) selects the right frame on both 60 Hz and
+        // 30 Hz grids for every cap in use.
+        if frame.timestamp - lastFrameTime < takeInterval - (frameInterval / 4) { return }
 
         // Apply backpressure before claiming the frame: if the writer is still
         // busy, drop this one now rather than queue it. A skipped frame costs
