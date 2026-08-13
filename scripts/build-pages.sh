@@ -16,7 +16,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Keep in step with package.json's chromapakz dependency. It had drifted a
 # minor behind, so the published demo was running an older decoder than the
 # tests — exactly the silent skew the pin is meant to make visible.
-CHROMAPAKZ_VERSION="0.10.0"
+CHROMAPAKZ_VERSION="0.11.0"
 CDN="https://cdn.jsdelivr.net/npm/chromapakz@${CHROMAPAKZ_VERSION}/src/chromapakz.js"
 
 OUT="$ROOT/docs/viewer"

@@ -38,7 +38,7 @@ jobs:
       # ChromaPakZ is pinned to the same release the rest of the repo depends on
       # (pyproject/package.json, and CHROMAPAKZ_REF in ios/scripts/build-native.sh).
       # Bump together. 0.6.0 is what takes device capture from 15.2 to 29.8 fps.
-      CHROMAPAKZ_REF: v0.10.0
+      CHROMAPAKZ_REF: v0.11.0
     steps:
       - uses: actions/checkout@v4
 

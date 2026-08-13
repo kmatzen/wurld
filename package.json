@@ -50,10 +50,10 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
-    "chromapakz": "^0.10.0"
+    "chromapakz": "^0.11.0"
   },
   "peerDependencies": {
-    "chromapakz": "^0.10.0"
+    "chromapakz": ">=0.10.0 <0.12.0"
   },
   "peerDependenciesMeta": {
     "chromapakz": {
