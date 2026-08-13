@@ -23,18 +23,50 @@ enum CaptureFormat: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// RGB recording resolution, as a fraction of the camera's capture resolution
+/// (1920x1440 on current devices). Depth always stays on its native LiDAR grid
+/// (SPEC §4.6); this knob only sets what the color stream costs. Full is honest
+/// about its price: the wurld path encodes VP9 in software, and a device that
+/// cannot keep up drops frames rather than stalling.
+enum RGBResolution: String, CaseIterable, Identifiable {
+    case full = "1×"
+    case half = "½"
+    case quarter = "¼"
+    var id: String { rawValue }
+    var scale: CGFloat {
+        switch self {
+        case .full: return 1.0
+        case .half: return 0.5
+        case .quarter: return 0.25
+        }
+    }
+}
+
 final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published var format: CaptureFormat = .wurld
+    /// UI-selected RGB resolution. Latched into `recordingScale` when a take
+    /// starts — the encoder's geometry is fixed at the first frame, so a change
+    /// mid-take must wait for the next one (the picker is disabled while
+    /// recording, and the latch makes that safe even if it were not).
+    @Published var rgbResolution: RGBResolution {
+        didSet { UserDefaults.standard.set(rgbResolution.rawValue, forKey: "rgbResolution") }
+    }
     @Published var isRecording = false
     @Published var frameCount = 0
     @Published var lastCaptureURL: URL?
     @Published var statusText = "ready"
 
+    override init() {
+        rgbResolution = UserDefaults.standard.string(forKey: "rgbResolution")
+            .flatMap(RGBResolution.init(rawValue:)) ?? .half
+        super.init()
+    }
+
     let session = ARSession()
     private let ciContext = CIContext()
-    /// Camera YpCbCr -> colour-managed sRGB RGBA at the depth grid, on the CPU
-    /// with vImage. Built once; touched only on `writeQueue`, one frame at a
-    /// time (`maxInFlight == 1`), so no locking is needed.
+    /// Camera YpCbCr -> color-managed sRGB RGBA at the recording resolution, on
+    /// the CPU with vImage. Built once; touched only on `writeQueue`, one frame
+    /// at a time (`maxInFlight == 1`), so no locking is needed.
     private let pixelConverter = PixelConverter()
     private var zip: ZipWriter?
     private var poses: [[Double]] = []
@@ -43,11 +75,13 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var rgbSize: CGSize = .zero
     private var depthSize: (w: Int, h: Int) = (0, 0)
     private var captureURL: URL?
-    // wurld path (chromapakz on-device; RGB downscaled to the depth grid)
+    // wurld path (chromapakz on-device; RGB at the selected fraction of the
+    // camera resolution, depth at its native LiDAR grid — per-stream
+    // resolution, SPEC §4.6)
     private var wlEncoder: ChromapakzStreamEncoder?
     private var wlWriter: WurldStreamWriter?
     private var wlFile: FileHandle?
-    private let wlNear = 0.1, wlFar = 12.0  // ARKit LiDAR effective range, metres
+    private let wlNear = 0.1, wlFar = 12.0  // ARKit LiDAR effective range, meters
     private var wlFirstTimestamp: TimeInterval?
     private let writeQueue = DispatchQueue(label: "wurld.capture.write")
     /// Frames handed to writeQueue but not yet encoded. The buffers we pass it
@@ -61,8 +95,10 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     /// Target capture cadence; ARKit delivers 60fps, LiDAR depth updates slower.
     private let frameInterval: TimeInterval = 1.0 / 30.0
     private var lastFrameTime: TimeInterval = -1
-    /// Halve RGB (1920x1440 -> 960x720) to keep captures small; K scales to match.
-    private let rgbScale: CGFloat = 0.5
+    /// The take's RGB scale, latched from `rgbResolution` at record start; K
+    /// scales to match. Applies to both output formats. Read only on
+    /// `writeQueue`, which `beginRecording` precedes.
+    private var recordingScale: CGFloat = 0.5
     #if targetEnvironment(simulator)
     let simulated = SimulatedSensor()
     private var simTimer: Timer?
@@ -165,6 +201,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             return
         }
         captureURL = url
+        recordingScale = rgbResolution.scale
         poses = []; timestamps = []; frameCount = 0; lastFrameTime = -1; wlFirstTimestamp = nil
         inFlightLock.lock(); inFlight = 0; droppedFrames = 0; inFlightLock.unlock()
         isRecording = true
@@ -262,26 +299,38 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                                      depth: CVPixelBuffer, confidence: CVPixelBuffer?) throws {
         let dw = CVPixelBufferGetWidth(depth), dh = CVPixelBufferGetHeight(depth)
         depthSize = (dw, dh)
+        // RGB records at its own resolution and depth stays on the native LiDAR
+        // grid (SPEC §4.6, chromapakz format v4) — neither is resampled to the
+        // other. The simulator's synthetic feed already renders at the depth
+        // grid, so it records there unscaled.
+        #if targetEnvironment(simulator)
+        let rw = dw, rh = dh
+        #else
+        // VP9 wants even dimensions; the camera resolutions and scales in play
+        // (1920x1440 at 1, 1/2, 1/4) all give them, but do not rely on it.
+        let rw = Int((rgbSize.width * recordingScale).rounded()) & ~1
+        let rh = Int((rgbSize.height * recordingScale).rounded()) & ~1
+        #endif
 
         if wlEncoder == nil {
-            // First frame: intrinsics and the depth grid are now known.
+            // First frame: intrinsics and both grids are now known.
             let K = intrinsics ?? matrix_identity_float3x3
-            let sx = Double(dw) / Double(rgbSize.width), sy = Double(dh) / Double(rgbSize.height)
+            let sx = Double(rw) / Double(rgbSize.width), sy = Double(rh) / Double(rgbSize.height)
             let doc: [String: Any] = [
-                "format": "wurld", "version": "1.2",   // SPEC §10; see wurld.container.FORMAT_VERSION
+                "format": "wurld", "version": "1.3",   // SPEC §10; see wurld.container.FORMAT_VERSION
                 "conventions": ["camera_axes": "RDF", "pose_direction": "camera_to_world",
                                 "quaternion_order": "wxyz", "units": "meters",
                                 "timestamp_units": "seconds"],
                 "world": ["metric_scale": true, "gravity_in_world": [0, -1, 0],
-                          "description": "WurldCam on-device recording (ARKit, RGB at depth grid)"],
-                "cameras": ["0": ["model": "PINHOLE", "width": dw, "height": dh,
+                          "description": "WurldCam on-device recording (ARKit; depth at the LiDAR grid)"],
+                "cameras": ["0": ["model": "PINHOLE", "width": rw, "height": rh,
                                   "params": [Double(K[0][0]) * sx, Double(K[1][1]) * sy,
                                              Double(K[2][0]) * sx, Double(K[2][1]) * sy]]],
                 "signals": [
-                    ["id": "depth", "role": "depth",
+                    ["id": "depth", "role": "depth", "width": dw, "height": dh,
                      "value_map": ["type": "inverse_depth", "near": wlNear,
                                    "far": wlFar, "levels": 65536, "invalid": 0]],
-                    ["id": "confidence", "role": "confidence",
+                    ["id": "confidence", "role": "confidence", "width": dw, "height": dh,
                      "value_map": ["type": "labels",
                                    "labels": ["0": "low", "1": "medium", "2": "high"]]],
                 ],
@@ -292,9 +341,12 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             }
             wlWriter = writer
             // Creating the encoder emits the mux header through weave immediately.
+            // depthWidth/Height only differ from the file geometry on a device;
+            // equal pairs keep the output byte-identical to the pre-v4 form.
             wlEncoder = try ChromapakzStreamEncoder(
-                width: dw, height: dh, fps: Int(round(1.0 / frameInterval)),
+                width: rw, height: rh, fps: Int(round(1.0 / frameInterval)),
                 rgbKbps: 2000, near: wlNear, far: wlFar, includeConfidence: true,
+                depthWidth: dw, depthHeight: dh,
                 // Poses also go out as WebVTT cues so a capture that never touches a
                 // desktop is still readable by plain ffmpeg. The binary table written
                 // by WurldStreamWriter stays authoritative.
@@ -322,7 +374,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             timestamp: max(0, t),
             duration: frameInterval)
 
-        let rgba = try pixelConverter.sRGBA(from: image, width: dw, height: dh)
+        let rgba = try pixelConverter.sRGBA(from: image, width: rw, height: rh)
         let z = floatPlane(depth)
         var conf = [UInt16](repeating: 2, count: dw * dh)  // "high" when ARKit omits the map
         if let confidence {
@@ -355,8 +407,15 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private func writeFrame(index: Int, image: CVPixelBuffer,
                             depth: CVPixelBuffer, confidence: CVPixelBuffer?) throws {
         var ci = CIImage(cvPixelBuffer: image)
-        if rgbScale != 1 {
-            ci = ci.transformed(by: CGAffineTransform(scaleX: rgbScale, y: rgbScale))
+        if recordingScale != 1 {
+            // Lanczos, not a bare affine transform: the affine path samples
+            // bilinearly with no prefilter, which aliases on minification.
+            let lanczos = CIFilter(name: "CILanczosScaleTransform")!
+            lanczos.setValue(ci, forKey: kCIInputImageKey)
+            lanczos.setValue(recordingScale, forKey: kCIInputScaleKey)
+            lanczos.setValue(1.0, forKey: kCIInputAspectRatioKey)
+            ci = lanczos.outputImage ?? ci.transformed(
+                by: CGAffineTransform(scaleX: recordingScale, y: recordingScale))
         }
         guard let jpeg = ciContext.jpegRepresentation(
             of: ci, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -403,13 +462,13 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private func metadataJSON() -> Data {
         // K flat in COLUMN-major order at the (scaled) RGB resolution, matching Record3D.
         let K = intrinsics ?? matrix_identity_float3x3
-        let s = Double(rgbScale)
+        let s = Double(recordingScale)
         let flatK: [Double] = [Double(K[0][0]) * s, 0, 0,
                                0, Double(K[1][1]) * s, 0,
                                Double(K[2][0]) * s, Double(K[2][1]) * s, 1]
         let meta: [String: Any] = [
-            "w": Int(rgbSize.width * rgbScale),
-            "h": Int(rgbSize.height * rgbScale),
+            "w": Int(rgbSize.width * recordingScale),
+            "h": Int(rgbSize.height * recordingScale),
             "dw": depthSize.w, "dh": depthSize.h,
             "K": flatK,
             "fps": Int(round(1.0 / frameInterval)),

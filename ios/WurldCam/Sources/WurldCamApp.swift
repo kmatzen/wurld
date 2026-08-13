@@ -57,6 +57,20 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 240)
                 .disabled(capture.isRecording)
+                // RGB resolution as a fraction of the camera's; depth always
+                // records at the native LiDAR grid, whatever is chosen here.
+                HStack(spacing: 8) {
+                    Text("rgb")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.7))
+                    Picker("rgb resolution", selection: $capture.rgbResolution) {
+                        ForEach(RGBResolution.allCases) { r in Text(r.rawValue).tag(r) }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 160)
+                    .disabled(capture.isRecording)
+                }
+                .accessibilityLabel("RGB recording resolution")
                 Text(capture.statusText)
                     .font(.system(.footnote, design: .monospaced))
                     .padding(6)

@@ -246,9 +246,34 @@ def v10_single_frame(path):
     return _expect(cams, frames, world={"metric_scale": True}, rgb_streams=["rgb"])
 
 
+def v11_mixed_resolution(path):
+    """Depth stored at its own resolution beside the RGB (SPEC §4.6, v1.3).
+
+    Half-size here; the motivating case is a 256x192 LiDAR map beside
+    full-resolution RGB. Pre-v4 chromapakz readers must fail loudly on the
+    depth stream, not return misshapen data.
+    """
+    import chromapakz as cz
+    cams = {"0": _cam()}
+    frames = _frames(4)
+    vm = {"type": "inverse_depth", "near": 0.3, "far": 9.0, "levels": 65536,
+          "invalid": 0}
+    sig = wl.SignalMeta("depth", "depth", vm)
+    yy, xx = np.mgrid[0:H // 2, 0:W // 2].astype(np.float32)
+    depth = np.stack([(1.5 + 0.4 * np.sin(xx / 2 + i * 0.2)).astype(np.float32)
+                      for i in range(4)])
+    wl.write(path, cameras=cams, frames=frames, rgb=_rgb(4),
+             signals={"depth": cz.quantize_inverse(depth, near=0.3, far=9.0)},
+             specs={"depth": {"inverse_depth": True, "near": 0.3, "far": 9.0}},
+             signal_meta=[sig], world={"metric_scale": True},
+             frames_format="json", fps=30)
+    return _expect(cams, frames, signals=[sig], world={"metric_scale": True},
+                   rgb_streams=["rgb"])
+
+
 VECTOR_FNS = [v01_minimal, v02_depth, v03_binary_frames, v04_unposed, v05_stereo,
               v06_rig_imu, v07_camera_models, v08_float16_signal,
-              v09_awkward_strings, v10_single_frame]
+              v09_awkward_strings, v10_single_frame, v11_mixed_resolution]
 
 
 def build(out_dir: Path) -> dict:

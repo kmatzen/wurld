@@ -17,8 +17,14 @@ final class ChromapakzStreamEncoder {
     /// `textTrack` declares a WebVTT metadata track (chromapakz >= 0.5.0). It exists so
     /// tools that will not install anything can read per-frame data: ffmpeg's Matroska
     /// demuxer drops TagBinary, so the binary pose table is invisible to it.
+    ///
+    /// `depthWidth`/`depthHeight` give the depth and confidence planes their own
+    /// geometry (chromapakz format v4, >= 0.10.0) — LiDAR depth stays 256x192 while
+    /// RGB records at the camera's resolution. 0,0 keeps them at `width`x`height`,
+    /// and such a file is byte-identical to what the pre-v4 entry points wrote.
     init(width: Int, height: Int, fps: Int, rgbKbps: Int,
          near: Double, far: Double, includeConfidence: Bool = false,
+         depthWidth: Int = 0, depthHeight: Int = 0,
          textTrack: String? = nil,
          onChunk: @escaping (Data) -> Void) throws {
         self.onChunk = onChunk
@@ -27,24 +33,31 @@ final class ChromapakzStreamEncoder {
         var h: OpaquePointer?
         let rc = "depth".withCString { depthPtr -> Int32 in
             "confidence".withCString { confPtr -> Int32 in
-                var specs = [dc_signal_spec_t(id: depthPtr, data: nil, inverse_depth: 1,
-                                              near_: near, far_: far, levels: 65536)]
+                var specs = [dc_signal_spec3_t(id: depthPtr, data: nil, inverse_depth: 1,
+                                               near_: near, far_: far, levels: 65536,
+                                               view: nil, width: Int32(depthWidth),
+                                               height: Int32(depthHeight))]
                 if includeConfidence {
-                    specs.append(dc_signal_spec_t(id: confPtr, data: nil, inverse_depth: 0,
-                                                  near_: 0, far_: 0, levels: 65536))
+                    // The ARKit confidence map shares the depth grid.
+                    specs.append(dc_signal_spec3_t(id: confPtr, data: nil, inverse_depth: 0,
+                                                   near_: 0, far_: 0, levels: 65536,
+                                                   view: nil, width: Int32(depthWidth),
+                                                   height: Int32(depthHeight)))
                 }
-                return specs.withUnsafeBufferPointer { specBuf -> Int32 in
-                    guard let name = textTrack else {
-                        return dc_stream_create(Int32(width), Int32(height), Int32(fps), Int32(rgbKbps),
-                                                1 /* has_rgb */, 0 /* emit_cues */,
-                                                specBuf.baseAddress, Int32(specs.count), &h)
-                    }
-                    return name.withCString { namePtr in
-                        dc_stream_create_ex(Int32(width), Int32(height), Int32(fps), Int32(rgbKbps),
-                                            1 /* has_rgb */, 0 /* emit_cues */,
-                                            specBuf.baseAddress, Int32(specs.count), namePtr, &h)
+                // A single NULL id takes the conventional stream name "rgb".
+                let rgbs = [dc_rgb_spec2_t(id: nil, kbps: Int32(rgbKbps), width: 0, height: 0)]
+                func create(_ namePtr: UnsafePointer<CChar>?) -> Int32 {
+                    specs.withUnsafeBufferPointer { specBuf in
+                        rgbs.withUnsafeBufferPointer { rgbBuf in
+                            dc_stream_create3(Int32(width), Int32(height), Int32(fps),
+                                              rgbBuf.baseAddress, 1, 0 /* emit_cues */,
+                                              specBuf.baseAddress, Int32(specs.count),
+                                              namePtr, &h)
+                        }
                     }
                 }
+                guard let name = textTrack else { return create(nil) }
+                return name.withCString(create)
             }
         }
         guard rc == 0, h != nil else { throw EncoderError.create(rc) }
@@ -52,8 +65,9 @@ final class ChromapakzStreamEncoder {
         try takeChunk { dc_stream_header(h, $0, $1) }
     }
 
-    /// rgba: W*H*4 bytes; depth: W*H uint16 inverse-depth codes;
-    /// confidence: W*H raw codes (0/1/2), required iff includeConfidence.
+    /// rgba: width*height*4 bytes; depth/confidence: uint16 planes at their own
+    /// geometry (depthWidth*depthHeight when given, else width*height);
+    /// confidence carries raw codes (0/1/2), required iff includeConfidence.
     func addFrame(rgba: [UInt8], depth: [UInt16], confidence: [UInt16]? = nil) throws {
         guard let h = handle else { return }
         precondition((confidence != nil) == withConfidence,
@@ -120,7 +134,7 @@ final class ChromapakzStreamEncoder {
         dc_free(out)
     }
 
-    /// Float metres -> uint16 inverse-depth codes (NaN/out-of-range -> 0 invalid).
+    /// Float meters -> uint16 inverse-depth codes (NaN/out-of-range -> 0 invalid).
     static func quantize(_ z: [Float], near: Double, far: Double) -> [UInt16] {
         var out = [UInt16](repeating: 0, count: z.count)
         z.withUnsafeBufferPointer { zp in

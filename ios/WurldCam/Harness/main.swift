@@ -4,7 +4,9 @@ import simd
 // Synthetic recording through the exact Swift pipeline WurldCam uses:
 // ChromapakzStreamEncoder + WurldStreamWriter. Output validated by Python.
 
-let W = 64, H = 48, N = 20, FPS = 10
+// Mixed resolution, as a device records it: RGB at its own size, depth and
+// confidence on a smaller grid (SPEC §4.6, chromapakz format v4).
+let W = 64, H = 48, DW = 32, DH = 24, N = 20, FPS = 10
 let NEAR = 0.1, FAR = 12.0
 
 let outURL = URL(fileURLWithPath: CommandLine.arguments.count > 1
@@ -22,10 +24,10 @@ let doc: [String: Any] = [
     "cameras": ["0": ["model": "PINHOLE", "width": W, "height": H,
                       "params": [48.0, 48.0, 31.5, 23.5]]],
     "signals": [
-        ["id": "depth", "role": "depth",
+        ["id": "depth", "role": "depth", "width": DW, "height": DH,
          "value_map": ["type": "inverse_depth", "near": NEAR, "far": FAR,
                        "levels": 65536, "invalid": 0]],
-        ["id": "confidence", "role": "confidence",
+        ["id": "confidence", "role": "confidence", "width": DW, "height": DH,
          "value_map": ["type": "labels", "labels": ["0": "low", "1": "medium", "2": "high"]]],
     ],
     "frames": [],
@@ -33,7 +35,8 @@ let doc: [String: Any] = [
 
 let writer = try WurldStreamWriter(doc: doc) { data in file.write(data) }
 let enc = try ChromapakzStreamEncoder(width: W, height: H, fps: FPS, rgbKbps: 500,
-                                      near: NEAR, far: FAR, includeConfidence: true) { writer.weave($0) }
+                                      near: NEAR, far: FAR, includeConfidence: true,
+                                      depthWidth: DW, depthHeight: DH) { writer.weave($0) }
 
 for i in 0..<N {
     // ARKit-style RUB c2w: orbit in the XZ plane, y-up world
@@ -53,7 +56,6 @@ for i in 0..<N {
                                  arkitTransform: m))
 
     var rgba = [UInt8](repeating: 0, count: W * H * 4)
-    var z = [Float](repeating: 0, count: W * H)
     for v in 0..<H {
         for u in 0..<W {
             let k = v * W + u
@@ -61,12 +63,17 @@ for i in 0..<N {
             rgba[k * 4 + 1] = UInt8((v * 5) % 256)
             rgba[k * 4 + 2] = UInt8((i * 12) % 256)
             rgba[k * 4 + 3] = 255
-            // depth ramp with a NaN hole
-            z[k] = (u == 0 && v == 0) ? Float.nan
-                 : Float(0.5) + Float(u + v) / Float(W + H) * 8.0
         }
     }
-    var conf = [UInt16](repeating: 2, count: W * H)
+    var z = [Float](repeating: 0, count: DW * DH)
+    for v in 0..<DH {
+        for u in 0..<DW {
+            // depth ramp with a NaN hole, on the depth grid
+            z[v * DW + u] = (u == 0 && v == 0) ? Float.nan
+                          : Float(0.5) + Float(u + v) / Float(DW + DH) * 8.0
+        }
+    }
+    var conf = [UInt16](repeating: 2, count: DW * DH)
     conf[0] = 0  // the NaN-depth pixel is low confidence
     try enc.addFrame(rgba: rgba, depth: ChromapakzStreamEncoder.quantize(z, near: NEAR, far: FAR),
                      confidence: conf)

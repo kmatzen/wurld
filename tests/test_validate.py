@@ -292,7 +292,7 @@ def test_hdr_without_any_rgb_is_refused(tmp_path):
 
 def test_new_files_declare_the_current_format_version(good):
     doc = json.loads(ebml.read_all_tags(good.read_bytes())["WURLD"])
-    assert doc["version"] == container.FORMAT_VERSION == "1.2"
+    assert doc["version"] == container.FORMAT_VERSION == "1.3"
 
 
 def test_older_format_versions_still_read_and_validate(good, tmp_path):

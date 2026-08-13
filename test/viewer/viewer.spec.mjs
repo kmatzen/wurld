@@ -91,6 +91,27 @@ test('a depth capture loads: pixels, counter, and the depth export', async ({ pa
   expect(page.__errors, 'no page errors').toEqual([]);
 });
 
+test('depth at its own resolution draws on its own grid', async ({ page }) => {
+  // Per-stream resolution (SPEC §4.6, chromapakz format v4): v11 stores an
+  // 8x8 depth signal beside 16x16 RGB. The pre-v4 viewer sized every plane
+  // from the file pair, so the depth pane came out 3/4 empty and the point
+  // cloud indexed the 64-sample buffer with 16x16 strides.
+  await drop(page, V('v11_mixed_resolution'));
+  await waitForFrames(page, 4);
+
+  const v = await view(page);
+  expect(v.rgbPixels, 'RGB fills its 16x16 pane').toBe(16 * 16);
+  expect(v.depthPixels, 'depth fills its own 8x8 pane, not a 16x16 one').toBe(8 * 8);
+  const panes = await page.evaluate(() => ({
+    rgb: [rgbPane.width, rgbPane.height],
+    depth: [depthPane.width, depthPane.height],
+  }));
+  expect(panes.rgb).toEqual([16, 16]);
+  expect(panes.depth).toEqual([8, 8]);
+  expect(v.depthExportEnabled).toBe(true);
+  expect(page.__errors, 'no page errors').toEqual([]);
+});
+
 test('an RGB-only capture loads at all', async ({ page }) => {
   // Regression: chromapakz's normalizeMetadata rejected an empty signals[], so
   // createDecoder threw and the page silently rendered nothing. Needs

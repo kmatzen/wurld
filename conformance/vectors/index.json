@@ -71,6 +71,13 @@
       "expected": "v10_single_frame.expected.json",
       "description": "One frame. Off-by-one handling in a reader shows up here first.",
       "bytes": 1040
+    },
+    {
+      "name": "v11_mixed_resolution",
+      "file": "v11_mixed_resolution.wurld.webm",
+      "expected": "v11_mixed_resolution.expected.json",
+      "description": "Depth stored at its own resolution beside the RGB (SPEC \u00a74.6, v1.3).",
+      "bytes": 2339
     }
   ]
 }

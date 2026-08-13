@@ -7,8 +7,9 @@ import Foundation
 /// free of ARKit so they compile and unit-test on macOS without a device.
 ///
 /// The device path converts the camera's YpCbCr (4:2:0 biplanar) buffer into
-/// RGBA at the depth grid with vImage: the YpCbCr->RGB matrix (from the buffer's
-/// tagged matrix + range) and chroma upsample in one SIMD pass, then a downscale.
+/// RGBA at the recording resolution with vImage: the YpCbCr->RGB matrix (from
+/// the buffer's tagged matrix + range) and chroma upsample in one SIMD pass,
+/// then an antialiased (Lanczos) downscale when the target is smaller.
 /// No Core Image filter graph and no synchronous GPU->CPU readback — the step
 /// that made the write chain miss frames.
 ///
@@ -74,11 +75,25 @@ final class PixelConverter {
         guard convRC == kvImageNoError else { throw ConvertError.convert(convRC) }
 
         var out = [UInt8](repeating: 0, count: width * height * 4)
+        if width == sw && height == sh {
+            // Full resolution: no resample, just de-stride the scratch buffer.
+            out.withUnsafeMutableBytes { dstBytes in
+                let dst = dstBytes.baseAddress!
+                for row in 0..<sh {
+                    memcpy(dst + row * sw * 4, full.data + row * full.rowBytes, sw * 4)
+                }
+            }
+            return out
+        }
         let scaleRC: vImage_Error = out.withUnsafeMutableBytes { dstBytes in
             var dst = vImage_Buffer(data: dstBytes.baseAddress,
                                     height: vImagePixelCount(height), width: vImagePixelCount(width),
                                     rowBytes: width * 4)
-            return vImageScale_ARGB8888(&full, &dst, nil, vImage_Flags(kvImageNoFlags))
+            // High-quality resampling = Lanczos5 (default is Lanczos3); the
+            // kernel is scaled for minification either way, so the downscale is
+            // antialiased rather than point-sampled.
+            return vImageScale_ARGB8888(&full, &dst, nil,
+                                        vImage_Flags(kvImageHighQualityResampling))
         }
         guard scaleRC == kvImageNoError else { throw ConvertError.scale(scaleRC) }
         return out
