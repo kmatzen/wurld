@@ -425,10 +425,15 @@ camera's pixels. Adopting it is a SPEC change and a deliberate decision, not a
 pin bump. Rig extrinsics and derived poses already work regardless (see
 scenario 4).
 
-**Where the frame budget actually is.** On-device capture reaches 30 fps at
-256×192 with RGB, depth and confidence. Higher depth resolutions or more signals
-will exceed the budget again; lossless coding of sensor noise is the cost, and
-it is inherent rather than a tuning problem.
+**Where the frame budget actually is.** On-device capture reached 30 fps at
+256×192 with RGB, depth and confidence — everything forced onto the depth grid.
+Per-stream resolution (SPEC §4.6, ChromaPakZ 0.10.0) removed that coupling:
+WurldCam now records RGB at half the camera resolution (960×720) beside depth
+and confidence at their native 256×192, and the capture path's backpressure
+drops frames rather than stalling if a device cannot hold 30 fps at the larger
+RGB size. The lossless signal tracks stay at the sensor grid, so their cost is
+unchanged; the new budget question is the lossy VP9 encode of the bigger RGB
+plane, which is a tuning knob (`rgbScale`), not an inherent cost.
 
 ---
 

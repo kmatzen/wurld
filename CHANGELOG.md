@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.5.0 — 2026-08-12
+
+### Added — per-stream resolution (SPEC v1.3, chromapakz >= 0.10.0)
+
+Streams no longer share one resolution: a 256×192 LiDAR depth map rides beside
+full-resolution RGB instead of one being resampled to the other. Format v1.3 is
+additive — a signal (or display stream) may carry its own `width`/`height`, the
+file pair stays the primary display resolution, and uniform files are written
+byte-identically to before.
+
+- **SPEC.** New §4.6 defines what chromapakz's format v4 explicitly leaves to
+  its wrapper: signal grids are FOV-aligned with their camera's image, so
+  intrinsics scale linearly onto them. §4.1's calibration rule becomes
+  per-stream (each camera at its own stream's resolution — the same statement
+  as before for pre-1.3 files). Signal entries may state their geometry
+  (§4.3); the chromapakz metadata stays authoritative.
+- **Python.** `write()` accepts mixed-resolution arrays (each camera is checked
+  against its own stream); the document self-describes signal geometry even
+  when the caller never mentioned it. `SignalMeta` carries optional
+  `width`/`height`, which `StreamWriter` declares to the streaming encoder.
+  New `Sequence.signal_resolution(id)`, and `Sequence.K(..., signal_id=...)`
+  returns intrinsics scaled to a signal's own grid. `validate` checks
+  resolution agreement per stream and signal-geometry consistency.
+- **Viewer.** Reads per-stream geometry from the codec metadata: the point
+  cloud samples depth on its own grid with scaled intrinsics and maps colours
+  across geometries; the 2D panes and the `.npy` export use each plane's own
+  size. Both the buffered and lazy paths.
+- **WurldCam (iOS).** The recorder no longer downscales RGB to the depth grid:
+  RGB records at half the camera resolution (960×720) beside native 256×192
+  depth/confidence, via the chromapakz `dc_stream_create3` streaming ABI.
+  Native pin moves to v0.10.0.
+- **Conformance.** New `v11_mixed_resolution` vector; pre-v4 readers must fail
+  loudly on it rather than return misshapen data.
+
 ## 1.4.0 — 2026-08-11
 
 The recommended file suffix becomes `.wurld.webm`, and the browser viewer stops

@@ -19,7 +19,7 @@ from . import conventions, ebml
 
 # The document `version` field (SPEC §10), not the package version.
 # Tracks the SPEC revision: minor bumps are additive-only.
-FORMAT_VERSION = "1.2"
+FORMAT_VERSION = "1.3"
 
 # Binary frame table (SPEC §7): u32 i, u32 camera idx, f64 t, 4×f32 q, 3×f32 tr, u8 flags
 _FRAME_RECORD = struct.Struct("<IId4f3fB")
@@ -224,13 +224,30 @@ class SignalMeta:
     id: str
     role: str  # depth | confidence | object_id | semantic_id | normal_packed | custom
     value_map: dict = field(default_factory=lambda: {"type": "identity"})
+    # The signal's own stored resolution (SPEC §4.6), when it differs from the
+    # file's. The chromapakz metadata is authoritative; this pair keeps the
+    # WURLD document self-describing and tells a streaming writer what geometry
+    # to declare. Always both or neither.
+    width: int | None = None
+    height: int | None = None
+
+    def __post_init__(self):
+        if (self.width is None) != (self.height is None):
+            raise ValueError(
+                f"signal {self.id!r}: give width and height together, or neither"
+            )
 
     def to_json(self) -> dict:
-        return {"id": self.id, "role": self.role, "value_map": self.value_map}
+        d = {"id": self.id, "role": self.role, "value_map": self.value_map}
+        if self.width is not None:
+            d["width"] = self.width
+            d["height"] = self.height
+        return d
 
     @classmethod
     def from_json(cls, d: dict) -> "SignalMeta":
-        return cls(d["id"], d["role"], d.get("value_map", {"type": "identity"}))
+        return cls(d["id"], d["role"], d.get("value_map", {"type": "identity"}),
+                   d.get("width"), d.get("height"))
 
     def apply(self, raw: np.ndarray) -> np.ndarray:
         """Map raw uint16 values to physical values (NaN where invalid)."""
@@ -455,12 +472,42 @@ class Sequence:
             raw = raw[frame_index]
         return meta.apply(raw)
 
-    def K(self, camera_id: str = "0", frame_index: int | None = None) -> np.ndarray:
-        """Intrinsics for a camera, honoring a per-frame override when given."""
+    def signal_resolution(self, signal_id: str) -> tuple[int, int]:
+        """(width, height) a signal is stored at (SPEC §4.6).
+
+        Per-stream geometry (chromapakz format v4) lets a 256x192 LiDAR depth
+        map ride beside full-resolution RGB; a signal with no geometry of its
+        own is at the file resolution, as every signal was before v1.3. Read
+        from the codec metadata, which is authoritative.
+        """
+        probe = self.probe or {}
+        for s in probe.get("signals") or []:
+            if s.get("id") == signal_id:
+                return (s.get("width") or probe["width"],
+                        s.get("height") or probe["height"])
+        raise KeyError(f"no signal {signal_id!r}; file has "
+                       f"{[s.get('id') for s in probe.get('signals') or []]}")
+
+    def K(self, camera_id: str = "0", frame_index: int | None = None,
+          signal_id: str | None = None) -> np.ndarray:
+        """Intrinsics for a camera, honoring a per-frame override when given.
+
+        With ``signal_id``, the intrinsics are scaled to that signal's stored
+        resolution (SPEC §4.6: signal grids are FOV-aligned with the camera
+        image, so calibration scales linearly) — the K to unproject a depth
+        plane that is stored smaller than the video.
+        """
         cam = self.cameras[camera_id]
         if frame_index is not None and self.frames[frame_index].params is not None:
             cam = Camera(cam.model, cam.width, cam.height, self.frames[frame_index].params)
-        return cam.K
+        K = cam.K
+        if signal_id is not None:
+            sw, sh = self.signal_resolution(signal_id)
+            if (sw, sh) != (cam.width, cam.height):
+                K = K.copy()
+                K[0] *= sw / cam.width
+                K[1] *= sh / cam.height
+        return K
 
     def c2w(self, frame_index: int) -> np.ndarray:
         return self.frames[frame_index].c2w
@@ -617,15 +664,32 @@ def write(
             if f.camera not in known:
                 problems.append(f"frame {f.i}: unknown camera {f.camera!r}")
                 break
-        # All streams share one W x H (chromapakz declares it per file), so any
-        # one of them settles the resolution every camera must be calibrated at.
-        probe_rgb = next(iter(rgb.values())) if isinstance(rgb, dict) else rgb
-        for cam in cameras.values():
-            if probe_rgb is not None and (cam.width != probe_rgb.shape[2]
-                                          or cam.height != probe_rgb.shape[1]):
+        # Each camera is calibrated at its own stream's resolution (SPEC §4.1);
+        # streams need not agree with each other since v1.3 / chromapakz v4.
+        if isinstance(rgb, dict):
+            for cid, arr in rgb.items():
+                cam = cameras.get(cid)
+                if cam is not None and (cam.width != arr.shape[2]
+                                        or cam.height != arr.shape[1]):
+                    problems.append(
+                        f"camera {cid!r} calibrated at {cam.width}x{cam.height} but its "
+                        f"stream is {arr.shape[2]}x{arr.shape[1]} (SPEC 4.1 requires equality)"
+                    )
+        elif rgb is not None:
+            # One stream shared by every posed camera: all of them see its pixels.
+            for cam in cameras.values():
+                if cam.width != rgb.shape[2] or cam.height != rgb.shape[1]:
+                    problems.append(
+                        f"camera calibrated at {cam.width}x{cam.height} but video is "
+                        f"{rgb.shape[2]}x{rgb.shape[1]} (SPEC requires equality)"
+                    )
+        for s in signal_meta:
+            arr = (signals or {}).get(s.id)
+            if s.width is not None and arr is not None and (
+                    s.width != arr.shape[2] or s.height != arr.shape[1]):
                 problems.append(
-                    f"camera calibrated at {cam.width}x{cam.height} but video is "
-                    f"{probe_rgb.shape[2]}x{probe_rgb.shape[1]} (SPEC requires equality)"
+                    f"signal {s.id!r} declares {s.width}x{s.height} but its plane is "
+                    f"{arr.shape[2]}x{arr.shape[1]} (SPEC 4.3: the pair must agree)"
                 )
         for f in frames:
             if f.params is not None and len(f.params) != len(cameras[f.camera].params):
@@ -637,6 +701,24 @@ def write(
         problems += _validate_rigs(rigs, cameras)
         if problems:
             raise ValueError("invalid wurld data:\n  " + "\n  ".join(problems))
+
+    # Per-stream geometry in the document (SPEC §4.6): a signal stored at its
+    # own resolution states it, so the document stays self-describing even for
+    # a caller that never mentioned geometry (chromapakz infers it from the
+    # arrays; the codec metadata stays authoritative either way).
+    if signals:
+        primary = next(iter(rgb.values())) if isinstance(rgb, dict) else rgb
+        if primary is None:
+            primary = next(iter(signals.values()))
+        ph, pw = primary.shape[1], primary.shape[2]
+        signal_meta = [
+            SignalMeta(s.id, s.role, s.value_map,
+                       signals[s.id].shape[2], signals[s.id].shape[1])
+            if s.width is None and s.id in signals
+               and signals[s.id].shape[1:3] != (ph, pw)
+            else s
+            for s in signal_meta
+        ]
 
     # Video-track fps is presentation timing only (frame `t` values are the
     # authoritative timestamps); chromapakz requires an integer rate.

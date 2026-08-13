@@ -25,15 +25,19 @@ import wurld as wl
 from wurld.stream import StreamReader
 seq = wl.read(sys.argv[1])
 assert len(seq.frames) == 20 and seq.frames[3].t == 0.3
+# RGB at 64x48, depth/confidence on their own 32x24 grid (SPEC 4.6).
+assert seq.rgb.shape == (20, 48, 64, 4)
+assert seq.signal_resolution("depth") == (32, 24)
 dm = seq.depth_meters(5)
-assert np.isnan(dm[0, 0]) and abs(dm[7, 10] - (0.5 + 17 / 112 * 8.0)) < 0.01
+assert dm.shape == (24, 32)
+assert np.isnan(dm[0, 0]) and abs(dm[7, 10] - (0.5 + 17 / 56 * 8.0)) < 0.01
 r = StreamReader()
 data = open(sys.argv[1], "rb").read()
 for off in range(0, len(data), 512):
     r.feed(data[off : off + 512])
 assert len(r.frames) == 20
 conf = seq.signal("confidence")
-assert conf.shape == (20, 48, 64) and conf[0, 0, 0] == 0 and (conf[:, 1:, :] == 2).all()
+assert conf.shape == (20, 24, 32) and conf[0, 0, 0] == 0 and (conf[:, 1:, :] == 2).all()
 assert seq.signal_meta("confidence").value_map["labels"]["2"] == "high"
-print("pipeline verification OK:", len(seq.frames), "frames + confidence, bit-checked")
+print("pipeline verification OK:", len(seq.frames), "mixed-res frames + confidence, bit-checked")
 EOF

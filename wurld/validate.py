@@ -94,7 +94,7 @@ def validate(path: str | Path) -> list[Finding]:
     _check_document(r, doc)
     cameras = doc.get("cameras") or {}
     _check_cameras(r, cameras, data)
-    _check_signals(r, doc)
+    _check_signals(r, doc, data)
     _check_streams(r, doc, cameras, data)
     frames = _check_frames(r, doc, tags, cameras)
     _check_rigs(r, doc, cameras)
@@ -149,10 +149,23 @@ def _check_cameras(r: _Report, cameras: dict, data: bytes) -> None:
         w, h = cam.get("width"), cam.get("height")
         if not (isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0):
             r.error("4.1", f"camera {cid!r}: width/height must be positive ints, got {w}x{h}")
-        elif vw and vh and (w != vw or h != vh):
-            # §4.1: calibrated resolution MUST equal the video track resolution.
-            r.error("4.1", f"camera {cid!r} is calibrated {w}x{h} but the video track is "
-                           f"{vw}x{vh}; intrinsics would be applied at the wrong scale")
+        elif vw and vh:
+            # §4.1: calibrated resolution MUST equal the camera's own stream's
+            # resolution. Streams may differ from the file pair since v1.3
+            # (chromapakz format v4); a multi-stream camera with no stream of
+            # its own has nothing to bind to.
+            streams = {x.get("id"): x for x in (video.get("rgbs") or []) if x.get("id")}
+            if len(streams) >= 2:
+                if cid in streams:
+                    sw = streams[cid].get("width") or vw
+                    sh = streams[cid].get("height") or vh
+                    if w != sw or h != sh:
+                        r.error("4.1", f"camera {cid!r} is calibrated {w}x{h} but its "
+                                       f"stream is {sw}x{sh}; intrinsics would be "
+                                       "applied at the wrong scale")
+            elif w != vw or h != vh:
+                r.error("4.1", f"camera {cid!r} is calibrated {w}x{h} but the video track is "
+                               f"{vw}x{vh}; intrinsics would be applied at the wrong scale")
 
 
 def _check_streams(r: _Report, doc: dict, cameras: dict, data: bytes) -> None:
@@ -179,11 +192,29 @@ def _check_streams(r: _Report, doc: dict, cameras: dict, data: bytes) -> None:
                        "HDR applies to all of a file's streams or none")
 
 
-def _check_signals(r: _Report, doc: dict) -> None:
+def _check_signals(r: _Report, doc: dict, data: bytes) -> None:
+    try:
+        probe = ebml.read_all_tags(data).get("CHROMAPAKZ")
+        cpz = json.loads(probe) if isinstance(probe, str) else {}
+    except Exception:  # noqa: BLE001
+        cpz = {}
+    stored = {x.get("id"): x for x in (cpz.get("signals") or []) if x.get("id")}
     for sig in doc.get("signals") or []:
         sid = sig.get("id")
         if not sid:
             r.error("4.3", "a signal has no id")
+        w, h = sig.get("width"), sig.get("height")
+        if (w is None) != (h is None):
+            r.error("4.3", f"signal {sid!r}: width and height come together or not at all, "
+                           f"got {w}x{h}")
+        elif w is not None and sid in stored and cpz.get("width"):
+            # §4.3: a declared pair must agree with the codec metadata, which
+            # is authoritative for stream geometry (SPEC §4.6).
+            sw = stored[sid].get("width") or cpz["width"]
+            sh = stored[sid].get("height") or cpz["height"]
+            if w != sw or h != sh:
+                r.error("4.3", f"signal {sid!r} declares {w}x{h} but is stored at "
+                               f"{sw}x{sh}; the chromapakz metadata is authoritative")
         role = sig.get("role")
         if role not in ROLES:
             r.warn("4.3", f"signal {sid!r}: unknown role {role!r}")

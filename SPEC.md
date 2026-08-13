@@ -1,4 +1,4 @@
-# wurld — posed sensor video, v1.2
+# wurld — posed sensor video, v1.3
 
 > **wurld** — the World's Unbroken Record of Localization & Depth.
 
@@ -132,8 +132,11 @@ Keyed by string camera id. `model` and `params` follow **COLMAP camera model nam
 | `OPENCV` | `[fx, fy, cx, cy, k1, k2, p1, p2]` |
 | `OPENCV_FISHEYE` | `[fx, fy, cx, cy, k1, k2, k3, k4]` |
 
-`width`/`height` are the *calibrated* resolution and MUST equal the video track
-resolution (a `scale` extension is reserved for a future revision).
+`width`/`height` are the *calibrated* resolution and MUST equal the resolution
+of **the display stream that carries this camera's pixels** (§4.4). Before v1.3
+every stream shared the file's one resolution, so this is the same statement
+for older files; from v1.3 a stream may carry its own (§4.6), and the camera is
+calibrated at that.
 
 ### 4.2 `frames`
 
@@ -165,6 +168,11 @@ Each entry binds a chromapakz signal id to a semantic role:
 - `value_map` (§6) defines the uint16 → physical mapping.
 - For `role: depth`, values map to **metric depth along the camera +Z axis** (not ray
   length), in meters.
+- `width`/`height` (optional, v1.3): the signal's own stored resolution, when it
+  differs from the file's (§4.6). The chromapakz metadata is authoritative for
+  stream geometry; a signal entry that carries the pair MUST agree with it. The
+  pair exists so the WURLD document stays self-describing for consumers that
+  read poses and semantics without opening the codec metadata.
 
 ### 4.4 Display streams and cameras (v1.2)
 
@@ -179,8 +187,10 @@ reader cannot tell which intrinsics apply to which pixels.
 - A file with a **single** stream carries the conventional id `rgb` and binds to
   its sole camera implicitly; the id-is-camera-id rule applies from two streams
   up, where a reader would otherwise have nothing to match on.
-- Every stream shares the file's width, height and frame grid. Unsynchronised
-  rigs are out of scope (§11: one rig, one clock).
+- Every stream shares the file's frame grid — all streams carry all frames.
+  Unsynchronised rigs are out of scope (§11: one rig, one clock). Before v1.3
+  every stream also shared the file's width and height; from v1.3 a stream may
+  carry its own resolution (§4.6).
 - A declared camera MAY have no stream of its own: its pose still derives from
   `rigs` (§8.1), it simply has no recorded pixels. The reverse MUST NOT happen —
   a stream whose id is not a declared camera is invalid.
@@ -189,8 +199,8 @@ reader cannot tell which intrinsics apply to which pixels.
   rather than restated per frame, where they can drift. Per-camera poses remain
   expressible via the frame record's camera field for non-rigid setups.
 
-Writers SHOULD calibrate every camera at the shared resolution (§4.1 requires
-equality with the video track).
+Writers SHOULD calibrate every camera at its own stream's resolution (§4.1
+requires equality with that stream's track).
 
 ### 4.5 HDR display track (v1.2)
 
@@ -206,6 +216,37 @@ shows, the signal is the data. Neither substitutes for the other, and a consumer
 that needs radiance MUST NOT read it off the display track.
 
 HDR applies to all of a file's display streams or none.
+
+### 4.6 Per-stream resolution (v1.3)
+
+Any stream — a display stream or a signal — MAY be stored at its own resolution
+(chromapakz format v4): a 256×192 LiDAR depth map rides beside full-resolution
+RGB instead of being resampled to it. The file-level width/height remain the
+**primary display resolution**. The chromapakz metadata (each `rgbs[]`/
+`signals[]` entry's `width`/`height`, defaulting to the file's) is authoritative
+for stream geometry; wurld adds the semantics chromapakz explicitly leaves to
+its wrapper — what a pixel in one geometry means in another:
+
+- A signal's grid is **FOV-aligned** with its camera's image: the two grids are
+  uniform samplings of the same field of view, with no crop or offset. A signal
+  binds to the camera of the stream it accompanies — the primary camera, until
+  a revision binds signals to cameras explicitly.
+- Intrinsics therefore apply to a signal stored at `sw`×`sh` after linear
+  scaling of the camera's calibration from its `W`×`H`:
+  `fx' = fx·sw/W, cx' = cx·sw/W, fy' = fy·sh/H, cy' = cy·sh/H`.
+  Writers MUST resample (or capture) signals so this holds; a signal that is
+  cropped or offset relative to its camera's image may not be stored at its own
+  resolution under this revision.
+- Display streams follow §4.1/§4.4 unchanged: each camera is calibrated at its
+  own stream's resolution, so no scaling rule is needed for pixels.
+- Nothing resamples on read. Consumers sample each stream on its own grid and
+  scale intrinsics; they MUST NOT assume a signal's buffer has the file's
+  resolution.
+
+Mixed-resolution files degrade loudly, not silently: a chromapakz reader that
+predates format v4 refuses the streams whose geometry differs (a geometry
+error) and reads the rest, so a pre-v1.3 wurld consumer sees a decode error,
+never misshapen data.
 
 ## 5. `world` block
 

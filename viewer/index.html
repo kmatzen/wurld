@@ -224,6 +224,15 @@ function applyMetadata(tags, headline) {
   // eye. Showing only the primary without saying so hides half the file.
   state.streams = (cpz.rgbs || []).map(r => r.id).filter(Boolean);
   state.stream = state.streams[0] ?? null;
+  // Per-stream geometry (SPEC §4.6, chromapakz format v4): an entry carrying
+  // its own width/height is stored at that size — a 256x192 LiDAR depth map
+  // beside full-resolution RGB. Absent means the file pair; entries resolve
+  // against state.W/H at use time because the decoder may set those later.
+  state.sigDims = Object.fromEntries((cpz.signals || []).filter(s => s.id)
+    .map(s => [s.id, { w: s.width ?? null, h: s.height ?? null }]));
+  state.rgbDims = Object.fromEntries((cpz.rgbs || []).filter(r => r.id)
+    .map(r => [r.id, { w: r.width ?? null, h: r.height ?? null }]));
+  state.depthId = null;   // resolved at first ingest (doc role, else first signal)
   buildStreamPicker();
   state.poses = new Map(); state.cloudCache = new Map(); state.frames = [];
   if (doc) {
@@ -266,6 +275,24 @@ function rgbOf(rec) {
   if (!rec) return null;
   if (state.stream && rec.rgbs && rec.rgbs[state.stream]) return rec.rgbs[state.stream];
   return rec.rgb;
+}
+
+/** Which signal the viewer treats as depth: the doc's depth role, else the first. */
+function depthIdOf(signals) {
+  return (state.doc?.signals || []).find(s => s.role === 'depth')?.id
+      ?? Object.keys(signals)[0];
+}
+
+/** The depth plane's own geometry (SPEC §4.6); the file pair when it has none. */
+function depthDims() {
+  const e = state.depthId != null ? state.sigDims?.[state.depthId] : null;
+  return { w: e?.w || state.W, h: e?.h || state.H };
+}
+
+/** The selected rgb stream's geometry; the primary is the file pair. */
+function rgbDims() {
+  const e = state.stream != null ? state.rgbDims?.[state.stream] : null;
+  return { w: e?.w || state.W, h: e?.h || state.H };
 }
 
 function buildStreamPicker() {
@@ -339,7 +366,8 @@ async function exportDepthNpy() {
   const meters = f && f.depth ? depthToMeters(f.depth) : null;
   if (!meters) return;
   // Minimal .npy v1.0: numpy loads it directly, NaN and all.
-  const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${state.H}, ${state.W}), }`;
+  const { w: DW, h: DH } = depthDims();
+  const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${DH}, ${DW}), }`;
   const pad = 64 - ((10 + header.length + 1) % 64 || 64);
   const head = header + ' '.repeat(pad) + '\n';
   const out = new Uint8Array(10 + head.length + meters.byteLength);
@@ -368,7 +396,8 @@ function showMeta(headline) {
     doc ? `wurld v${doc.version}; posed frames: ${state.poses.size}` : 'no WURLD tag (plain chromapakz)',
     state.frames.length ? `video: ${state.W}x${state.H}, ${state.frames.length} frames decoded` : '',
     state.camera ? `camera: ${state.camera.model} [${state.camera.params.map(v => +v.toFixed(2)).join(', ')}]` : '',
-    state.depthMap ? `depth map: ${JSON.stringify(state.depthMap)}` : 'no depth signal',
+    state.depthMap ? `depth map: ${JSON.stringify(state.depthMap)}`
+      + (depthDims().w !== state.W ? ` @ ${depthDims().w}x${depthDims().h}` : '') : 'no depth signal',
     state.hdr ? `HDR display track (${state.hdr.transfer}, ${state.hdr.bits}-bit): `
               + 'colour not shown — this viewer has no 10-bit decode path. '
               + 'Depth and poses are unaffected; open the file in a player to see it.' : '',
@@ -377,11 +406,13 @@ function showMeta(headline) {
 }
 
 function ingestFrame(frame) {
-  const wantedDepthId = (state.doc?.signals || []).find(s => s.role === 'depth')?.id;
   const rec = { rgb: frame.rgb ?? null, rgbs: frame.rgbs ?? null, depth: null };
   if (frame.signals) {
-    const depthId = wantedDepthId ?? Object.keys(frame.signals)[0];
-    if (depthId && frame.signals[depthId]) rec.depth = frame.signals[depthId].u16;
+    const depthId = depthIdOf(frame.signals);
+    if (depthId && frame.signals[depthId]) {
+      rec.depth = frame.signals[depthId].u16;
+      state.depthId = depthId;
+    }
   }
   state.frames.push(rec);
   document.getElementById('scrub').max = Math.max(0, state.frames.length - 1);
@@ -623,19 +654,29 @@ function cloudForFrame(i) {
   const { fx, fy, cx, cy } = camK(state.camera);
   const px = rgbOf(f);            // colours come from the selected stream
   const meters = depthToMeters(f.depth);
-  const { W, H } = state, R = pose.R, t = pose.t;
-  const maxPts = Math.ceil(W / STRIDE) * Math.ceil(H / STRIDE);
+  // Depth may be stored at its own resolution (SPEC §4.6): sample it on its
+  // own grid, with the camera's calibration scaled onto that grid (the two
+  // are FOV-aligned), and map back out to the rgb grid for colour.
+  const { w: DW, h: DH } = depthDims();
+  const { w: RW, h: RH } = rgbDims();
+  const kw = state.camera.width || DW, kh = state.camera.height || DH;
+  const fxd = fx * DW / kw, cxd = cx * DW / kw;
+  const fyd = fy * DH / kh, cyd = cy * DH / kh;
+  const R = pose.R, t = pose.t;
+  const maxPts = Math.ceil(DW / STRIDE) * Math.ceil(DH / STRIDE);
   const pos = new Float32Array(maxPts * 3), col = new Float32Array(maxPts * 3);
   let k = 0;
-  for (let v = 0; v < H; v += STRIDE) for (let u = 0; u < W; u += STRIDE) {
-    const z = meters[v * W + u];
+  for (let v = 0; v < DH; v += STRIDE) for (let u = 0; u < DW; u += STRIDE) {
+    const z = meters[v * DW + u];
     if (!Number.isFinite(z)) continue;
-    const xc = (u - cx) / fx * z, yc = (v - cy) / fy * z;
+    const xc = (u - cxd) / fxd * z, yc = (v - cyd) / fyd * z;
     pos[k*3]   = R[0]*xc + R[1]*yc + R[2]*z + t[0];
     pos[k*3+1] = R[3]*xc + R[4]*yc + R[5]*z + t[1];
     pos[k*3+2] = R[6]*xc + R[7]*yc + R[8]*z + t[2];
     if (px) {
-      const o = (v * W + u) * 4;
+      const ur = Math.min(RW - 1, Math.round((u + 0.5) * RW / DW - 0.5));
+      const vr = Math.min(RH - 1, Math.round((v + 0.5) * RH / DH - 0.5));
+      const o = (vr * RW + ur) * 4;
       col[k*3] = px[o] / 255; col[k*3+1] = px[o+1] / 255; col[k*3+2] = px[o+2] / 255;
     } else col[k*3] = col[k*3+1] = col[k*3+2] = 0.8;
     k++;
@@ -775,12 +816,12 @@ function clearPane(cv) {
 
 function drawPanes(i) {
   const f = state.frames[i]; if (!f) return;
-  const { W, H } = state;
   const rp = document.getElementById('rgbPane'), dp = document.getElementById('depthPane');
   const paneRgb = rgbOf(f);
   if (paneRgb) {
-    rp.width = W; rp.height = H;
-    rp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(paneRgb), W, H), 0, 0);
+    const { w: RW, h: RH } = rgbDims();
+    rp.width = RW; rp.height = RH;
+    rp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(paneRgb), RW, RH), 0, 0);
   } else {
     // Each branch below used to be write-only, which meant a pane kept whatever
     // was last drawn into it: open a file with no depth after one with depth and
@@ -789,11 +830,12 @@ function drawPanes(i) {
     clearPane(rp);
   }
   if (f.depth) {
-    dp.width = W; dp.height = H;
+    const { w: DW, h: DH } = depthDims();
+    dp.width = DW; dp.height = DH;
     const meters = depthToMeters(f.depth);
     let lo = Infinity, hi = -Infinity;
     for (const z of meters) if (Number.isFinite(z)) { if (z < lo) lo = z; if (z > hi) hi = z; }
-    const img = new ImageData(W, H), d = img.data;
+    const img = new ImageData(DW, DH), d = img.data;
     for (let k = 0; k < meters.length; k++) {
       const z = meters[k];
       if (!Number.isFinite(z)) { d[k*4+3] = 255; continue; }
@@ -1010,15 +1052,17 @@ function startCluster(k) {
       const dec = createDecoder(spliced);
       const first = starts[k].frame;
       const last = (k + 1 < starts.length ? starts[k + 1].frame : chroma.frames) - 1;
-      const wantedDepthId = (state.doc?.signals || []).find(s => s.role === 'depth')?.id;
       let j = 0;
       for (;;) {
         const frame = await dec.readFrame();
         if (!frame || first + j > last) break;
         const rec = { rgb: frame.rgb ?? null, rgbs: frame.rgbs ?? null, depth: null };
         if (frame.signals) {
-          const depthId = wantedDepthId ?? Object.keys(frame.signals)[0];
-          if (depthId && frame.signals[depthId]) rec.depth = frame.signals[depthId].u16;
+          const depthId = depthIdOf(frame.signals);
+          if (depthId && frame.signals[depthId]) {
+            rec.depth = frame.signals[depthId].u16;
+            state.depthId = depthId;
+          }
         }
         state.frames[first + j] = rec;
         j++;

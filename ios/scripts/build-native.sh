@@ -16,7 +16,7 @@ BUILD="$ROOT/.native-build"
 # (gitignored), so this pin is the only thing that makes an iOS build reproducible
 # — without it the libs come from whatever state a local checkout happens to be in.
 # Keep in step with the pins in pyproject.toml / package.json.
-CHROMAPAKZ_REF="${CHROMAPAKZ_REF:-v0.8.0}"
+CHROMAPAKZ_REF="${CHROMAPAKZ_REF:-v0.10.0}"
 # A local checkout wins when explicitly asked for (that is how you test an
 # unreleased change); otherwise clone the pinned tag, so a fresh machine needs
 # nothing set up.

@@ -128,6 +128,11 @@ class StreamWriter:
                     far=s.value_map["far"],
                     levels=s.value_map.get("levels", 65536),
                 )
+            # A signal at its own resolution (SPEC §4.6, chromapakz format v4,
+            # >= 0.10.0): declared up front because a streaming encoder plans
+            # its tracks before the first frame.
+            if s.width is not None:
+                spec.update(width=s.width, height=s.height)
             cz_signals.append(spec)
         # cues=False: we interleave tag elements between clusters, which would
         # invalidate cue byte offsets (SPEC §9 forbids stale Cues).
@@ -143,7 +148,15 @@ class StreamWriter:
         kwargs = {"text_track": "wurld-poses"} if self._pose_track else {}
         if self._rgb_streams:
             # A list of stream ids; order fixes track numbering, first is primary.
-            kwargs["rgbs"] = list(self._rgb_streams)
+            # A camera calibrated at its own resolution (SPEC §4.1/§4.6) gives
+            # its stream that geometry via the dict spec form.
+            kwargs["rgbs"] = [
+                sid if (cameras[sid].width, cameras[sid].height)
+                       == (cam0.width, cam0.height)
+                else {"id": sid, "width": cameras[sid].width,
+                      "height": cameras[sid].height}
+                for sid in self._rgb_streams
+            ]
             kwargs["has_rgb"] = False       # rgbs and has_rgb are exclusive
         else:
             kwargs["has_rgb"] = has_rgb
