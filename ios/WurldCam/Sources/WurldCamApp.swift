@@ -71,6 +71,15 @@ struct ContentView: View {
                     .disabled(capture.isRecording)
                 }
                 .accessibilityLabel("RGB recording resolution")
+                // The segment labels are fractions; this line is the truth of
+                // the selection — the pixels it records and the rate the device
+                // sustains there (full resolution is capped to an even 15 fps
+                // rather than left to jitter).
+                Text(capture.rgbResolution.detail(camera: capture.cameraNativeSize))
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
                 Text(capture.statusText)
                     .font(.system(.footnote, design: .monospaced))
                     .padding(6)

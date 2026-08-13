@@ -40,6 +40,25 @@ enum RGBResolution: String, CaseIterable, Identifiable {
         case .quarter: return 0.25
         }
     }
+    /// The rate each resolution actually sustains, measured on an iPhone 15
+    /// Pro with the realtime encoder profile (chromapakz 0.11.0): half and
+    /// quarter hold 30 fps with ~zero drops; full averaged ~18 fps with
+    /// 50–200 ms gaps. An even 15 beats a jittery 18 — every interval is one
+    /// of, not somewhere between, 66 ms — and the cap also states the price of
+    /// full resolution instead of hiding it in dropped frames.
+    var fps: Int {
+        switch self {
+        case .full: return 15
+        case .half, .quarter: return 30
+        }
+    }
+    /// What the picker's compact segment cannot say: the pixels this choice
+    /// records and the rate it records them at, for the given camera size.
+    func detail(camera: CGSize) -> String {
+        let w = Int((camera.width * scale).rounded()) & ~1
+        let h = Int((camera.height * scale).rounded()) & ~1
+        return "\(w)×\(h) · \(fps) fps"
+    }
 }
 
 final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
@@ -51,6 +70,17 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published var rgbResolution: RGBResolution {
         didSet { UserDefaults.standard.set(rgbResolution.rawValue, forKey: "rgbResolution") }
     }
+    /// The camera's native RGB size, for the resolution picker's detail line.
+    /// Known without running a session: it is a property of the device's video
+    /// format list, probed once.
+    let cameraNativeSize: CGSize = {
+        #if targetEnvironment(simulator)
+        CGSize(width: 1920, height: 1440)
+        #else
+        ARWorldTrackingConfiguration.supportedVideoFormats.first?.imageResolution
+            ?? CGSize(width: 1920, height: 1440)
+        #endif
+    }()
     @Published var isRecording = false
     @Published var frameCount = 0
     @Published var lastCaptureURL: URL?
@@ -94,6 +124,9 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private(set) var droppedFrames = 0
     /// Target capture cadence; ARKit delivers 60fps, LiDAR depth updates slower.
     private let frameInterval: TimeInterval = 1.0 / 30.0
+    /// The take's frame pacing, latched with `recordingScale`: full resolution
+    /// records an even 15 fps, the rest 30 (see RGBResolution.fps).
+    private var takeInterval: TimeInterval = 1.0 / 30.0
     private var lastFrameTime: TimeInterval = -1
     /// The take's RGB scale, latched from `rgbResolution` at record start; K
     /// scales to match. Applies to both output formats. Read only on
@@ -202,6 +235,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         }
         captureURL = url
         recordingScale = rgbResolution.scale
+        takeInterval = 1.0 / Double(rgbResolution.fps)
         poses = []; timestamps = []; frameCount = 0; lastFrameTime = -1; wlFirstTimestamp = nil
         inFlightLock.lock(); inFlight = 0; droppedFrames = 0; inFlightLock.unlock()
         isRecording = true
@@ -239,7 +273,11 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         guard isRecording, let sceneDepth = frame.sceneDepth else { return }
-        if frame.timestamp - lastFrameTime < frameInterval { return }
+        // Pace against the take's target, minus half a sensor tick: ARKit frames
+        // arrive on a ~33 ms grid, so comparing against the full interval makes a
+        // frame that lands a hair early miss the gate and stretch the gap to two
+        // ticks. The half-tick allowance keeps 15 fps meaning every-other-frame.
+        if frame.timestamp - lastFrameTime < takeInterval - (frameInterval / 2) { return }
 
         // Apply backpressure before claiming the frame: if the writer is still
         // busy, drop this one now rather than queue it. A skipped frame costs
@@ -344,7 +382,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             // depthWidth/Height only differ from the file geometry on a device;
             // equal pairs keep the output byte-identical to the pre-v4 form.
             wlEncoder = try ChromapakzStreamEncoder(
-                width: rw, height: rh, fps: Int(round(1.0 / frameInterval)),
+                width: rw, height: rh, fps: Int(round(1.0 / takeInterval)),
                 // 6000 kbps, not 2000: chromapakz 0.11.0 streams with the realtime encoder
                 // profile, where quality is a bitrate question — at 6000 the realtime path
                 // measures 39.2 dB, above the old good-quality baseline's 38.6, at 3x the
@@ -376,7 +414,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             "i=\(index) t=\(t) camera=0 "
             + "q_wxyz=\(q.x),\(q.y),\(q.z),\(q.w) tr=\(tr.x),\(tr.y),\(tr.z)",
             timestamp: max(0, t),
-            duration: frameInterval)
+            duration: takeInterval)
 
         let rgba = try pixelConverter.sRGBA(from: image, width: rw, height: rh)
         let z = floatPlane(depth)
