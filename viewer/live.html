@@ -292,6 +292,11 @@ document.getElementById('start').onclick = async () => {
     makeEncoder: onChunk => createEncoder({
       W, H, fps: FPS, hasRgb: true, onChunk,
       signals: [{ id: 'depth', near: NEAR, far: FAR }],
+      // Live capture is frame-budget bound, same as the native dc_stream_*
+      // encoders (chromapakz >= 0.12.0): trade a few percent more bytes for
+      // encode speed rather than defaulting to the archival GOOD_QUALITY
+      // profile a batch conversion would want.
+      realtime: true,
     }),
   });
 
