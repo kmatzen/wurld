@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.6.0 — 2026-08-24
+
+### Changed — chromapakz 0.12.0
+
+0.12.0 is additive for wurld: no format or Python API change, only a new
+`realtime` option on the browser `createEncoder`/`encode` (chromapakz.js) that
+opts a track into the same REALTIME-deadline, fastest-speed-step profile the
+native `dc_stream_*` streaming encoders already default to (0.11.0), instead
+of the archival GOOD_QUALITY profile. Signal tracks stay bit-exact either way;
+only encode time and, for a lossy RGB track, picture quality at a given
+bitrate trade against it.
+
+- **`viewer/live.html`** is a genuine frame-budget-bound case — it drives
+  `WurldRecorder`'s browser encoder from a live per-frame render loop — so its
+  `createEncoder` call now passes `realtime: true`. `WurldRecorder` itself
+  needed no change: it has always taken a caller-supplied `makeEncoder` so
+  codec options stay the caller's (see its doc comment), which is exactly why
+  this could be adopted without touching `viewer/wurld.js`.
+- The peer/dev version ranges that were blocking 0.12.0 move: `package.json`'s
+  `peerDependencies` ceiling was `<0.12.0`, which would have rejected the very
+  release this adopts; it is now `<0.13.0`, and the `devDependency` and
+  `package-lock.json` move to `^0.12.0`. `pyproject.toml`'s unbounded
+  `chromapakz>=0.10.0` already permitted 0.12.0.
+- `scripts/build-pages.sh`'s CDN pin and the iOS `CHROMAPAKZ_REF` pins (in
+  `.github/workflows/ios.yml` and `ios/scripts/build-native.sh`) move to
+  0.12.0/`v0.12.0` to keep every pin in step, per their own comments — 0.12.0
+  makes no native-ABI change WurldCam's capture path depends on.
+
 ## 1.5.0 — 2026-08-12
 
 ### Added — per-stream resolution (SPEC v1.3, chromapakz >= 0.10.0)
